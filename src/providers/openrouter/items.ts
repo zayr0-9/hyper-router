@@ -1,11 +1,11 @@
 import type {
   FunctionCallOutputItem,
   OutputFunctionCallItem,
+  OutputMessage,
 } from "@openrouter/agent";
 
 import type { Message } from "../../core/types.js";
 import type { OpenRouterInputItem } from "./types.js";
-import { toToolOutputValue } from "./tool-output.js";
 
 export function toInputItems(messages: Message[]): OpenRouterInputItem[] {
   const items: OpenRouterInputItem[] = [];
@@ -15,14 +15,26 @@ export function toInputItems(messages: Message[]): OpenRouterInputItem[] {
       items.push({
         type: "function_call_output",
         callId: message.toolCallId ?? `${message.name ?? "tool"}-result`,
-        output: toToolOutputValue(message.content),
+        output: message.content,
       } satisfies FunctionCallOutputItem);
       continue;
     }
 
     if (message.role === "assistant") {
       if (message.content && message.content.trim().length > 0) {
-        // Assistant text is already preserved in provider-managed state after the first turn.
+        items.push({
+          id: toOpenRouterMessageItemId(message, index),
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [
+            {
+              type: "output_text",
+              text: message.content,
+              annotations: [],
+            },
+          ],
+        } satisfies OutputMessage);
       }
 
       for (const toolCall of message.toolCalls ?? []) {

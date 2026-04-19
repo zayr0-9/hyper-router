@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+
 import type { AgentDefinition } from "./agent.js";
 import type { ModelProvider } from "./providers.js";
-import type { StorageAdapter } from "./storage.js";
+import type { SessionMetadata, StorageAdapter } from "./storage.js";
 import type { AgentRunInput, Message, RunStatus, ToolCall, ToolResult } from "./types.js";
 
 export interface RuntimeConfig {
@@ -19,7 +21,12 @@ export class AgentRuntime {
 
   async run(input: AgentRunInput): Promise<RuntimeResult> {
     const maxSteps = input.maxSteps ?? 5;
-    const previousMessages = await this.config.storage.loadMessages(input.sessionId);
+    const previousMessages = (await this.config.storage.loadMessages(input.sessionId)).filter(
+      (message) => message.role !== "system",
+    );
+    const previousSessionMetadata = this.config.storage.getSessionMetadata
+      ? await this.config.storage.getSessionMetadata(input.sessionId)
+      : null;
 
     const baseMessages: Message[] = this.config.agent.buildMessages
       ? await this.config.agent.buildMessages(input.input)
@@ -39,6 +46,7 @@ export class AgentRuntime {
         model: this.config.agent.model,
         messages,
         tools: this.config.agent.tools ?? [],
+        previousSessionMetadata,
       });
 
       if (response.message) {
@@ -61,14 +69,50 @@ export class AgentRuntime {
       }
     }
 
-    await this.config.storage.saveMessages(input.sessionId, messages);
+    const transcriptMessages = messages.filter((message) => message.role !== "system");
+
+    await this.config.storage.saveMessages(input.sessionId, transcriptMessages);
     await this.config.storage.saveRun({
       sessionId: input.sessionId,
       status,
-      messages,
     });
+    await this.updateSessionMetadata(input.sessionId);
 
     return { status, messages };
+  }
+
+  private async updateSessionMetadata(sessionId: string): Promise<void> {
+    if (!this.config.storage.setSessionMetadata) {
+      return;
+    }
+
+    const existingMetadata = this.config.storage.getSessionMetadata
+      ? await this.config.storage.getSessionMetadata(sessionId)
+      : null;
+
+    const metadata: SessionMetadata = {
+      ...existingMetadata,
+      agentName: this.config.agent.name,
+      model: this.config.agent.model,
+      promptHash: this.hashValue(this.config.agent.instructions),
+      promptSnapshot: this.config.agent.instructions,
+      toolsetHash: this.hashValue(
+        JSON.stringify(
+          (this.config.agent.tools ?? []).map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema ?? null,
+          })),
+        ),
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.config.storage.setSessionMetadata(sessionId, metadata);
+  }
+
+  private hashValue(value: string): string {
+    return createHash("sha256").update(value).digest("hex");
   }
 
   private async executeToolCalls(

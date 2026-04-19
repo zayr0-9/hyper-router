@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
 
+import type { SessionMetadata } from "../src/core/storage.js";
 import type { Message } from "../src/core/types.js";
 import type { ToolDefinition } from "../src/core/tool.js";
 import { toInputItems } from "../src/providers/openrouter/items.js";
 import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
-import { toToolOutputValue } from "../src/providers/openrouter/tool-output.js";
-import type { OpenRouterClientLike } from "../src/providers/openrouter/types.js";
+import type { OpenRouterClientLike, OpenRouterStateStore } from "../src/providers/openrouter/types.js";
 
 function createMessages(): Message[] {
   return [
@@ -55,6 +55,29 @@ type MockStateAccessor = {
   load: () => Promise<{ messages?: unknown } | null>;
   save?: (state: unknown) => Promise<void>;
 };
+
+function createMetadata(overrides: Partial<SessionMetadata> = {}): SessionMetadata {
+  return {
+    model: "openai/gpt-5-mini",
+    promptHash: "prompt-hash-1",
+    toolsetHash: "toolset-hash-1",
+    ...overrides,
+  };
+}
+
+function createMemoryStateStore(): OpenRouterStateStore {
+  const store = new Map<string, Awaited<ReturnType<OpenRouterStateStore["load"]>>>();
+
+  return {
+    load: vi.fn(async (sessionId: string) => store.get(sessionId) ?? null),
+    save: vi.fn(async (sessionId: string, envelope) => {
+      store.set(sessionId, JSON.parse(JSON.stringify(envelope)) as typeof envelope);
+    }),
+    clear: vi.fn(async (sessionId: string) => {
+      store.delete(sessionId);
+    }),
+  };
+}
 
 type MockCallModelRequest = {
   input?: unknown;
@@ -126,11 +149,11 @@ describe("OpenRouterProvider", () => {
     expect(items[2]).toEqual({
       type: "function_call_output",
       callId: "call_echo",
-      output: JSON.stringify({ echoed: "hello" }),
+      output: '{"ok":true,"output":{"echoed":"hello"}}',
     });
   });
 
-  it("emits assistant tool calls as function_call items", () => {
+  it("preserves assistant text alongside tool calls", () => {
     const items = toInputItems([
       {
         role: "assistant",
@@ -148,10 +171,49 @@ describe("OpenRouterProvider", () => {
 
     expect(items).toEqual([
       {
+        id: "assistant-1735689600000-0",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [
+          {
+            type: "output_text",
+            text: "I should call a tool.",
+            annotations: [],
+          },
+        ],
+      },
+      {
         type: "function_call",
         callId: "call_123",
         name: "echo",
         arguments: JSON.stringify({ text: "hello" }),
+      },
+    ]);
+  });
+
+  it("emits assistant text-only messages as assistant items", () => {
+    const items = toInputItems([
+      {
+        role: "assistant",
+        content: "Done.",
+        date: new Date("2025-01-01T00:00:03.000Z"),
+      },
+    ]);
+
+    expect(items).toEqual([
+      {
+        id: "assistant-1735689603000-0",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [
+          {
+            type: "output_text",
+            text: "Done.",
+            annotations: [],
+          },
+        ],
       },
     ]);
   });
@@ -179,17 +241,6 @@ describe("OpenRouterProvider", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("unwraps successful tool result payloads", () => {
-    expect(toToolOutputValue(JSON.stringify({ ok: true, output: { echoed: "hello" } }))).toBe(
-      JSON.stringify({ echoed: "hello" }),
-    );
-  });
-
-  it("converts failed tool results into error payloads", () => {
-    expect(toToolOutputValue(JSON.stringify({ ok: false, error: "boom" }))).toBe(
-      JSON.stringify({ error: "boom" }),
-    );
-  });
 
   it("normalizes text and tool calls into ModelResponse", async () => {
     const getText = vi.fn(async () => "Tool requested.");
@@ -215,6 +266,7 @@ describe("OpenRouterProvider", () => {
       model: "openai/gpt-5-mini",
       messages: createMessages(),
       tools: [createEchoTool()],
+      previousSessionMetadata: null,
     });
 
     expect(callModel).toHaveBeenCalledTimes(1);
@@ -241,6 +293,7 @@ describe("OpenRouterProvider", () => {
       model: "openai/gpt-5-mini",
       messages: createMessages(),
       tools: [],
+      previousSessionMetadata: null,
     });
 
     expect(result.message).toBeUndefined();
@@ -248,7 +301,7 @@ describe("OpenRouterProvider", () => {
     expect(result.stopReason).toBe("completed");
   });
 
-  it("passes state accessor and initial item input for session-backed calls", async () => {
+  it("uses StateAccessor for session-backed calls in hybrid mode", async () => {
     let capturedRequest: MockCallModelRequest | undefined;
 
     const provider = new OpenRouterProvider({
@@ -265,6 +318,9 @@ describe("OpenRouterProvider", () => {
           ],
         };
       }),
+      continuation: {
+        strategy: "hybrid",
+      },
     });
 
     const result = await provider.generate({
@@ -278,6 +334,7 @@ describe("OpenRouterProvider", () => {
         },
       ],
       tools: [createEchoTool()],
+      previousSessionMetadata: createMetadata(),
     });
 
     expect(capturedRequest?.state).toBeDefined();
@@ -302,7 +359,49 @@ describe("OpenRouterProvider", () => {
     ]);
   });
 
-  it("resumes with stateful item history and only sends incremental external input", async () => {
+  it("defaults to transcript mode and skips StateAccessor", async () => {
+    let capturedRequest: MockCallModelRequest | undefined;
+
+    const provider = new OpenRouterProvider({
+      client: createMockClient((request) => {
+        capturedRequest = request;
+        return {
+          getText: async () => "done",
+          getToolCalls: async () => [],
+        };
+      }),
+    });
+
+    await provider.generate({
+      sessionId: "session-transcript",
+      model: "openai/gpt-5-mini",
+      messages: [
+        {
+          role: "user",
+          content: "Hello",
+          date: new Date("2025-01-01T00:00:00.000Z"),
+        },
+      ],
+      tools: [],
+      previousSessionMetadata: createMetadata(),
+    });
+
+    expect(capturedRequest?.state).toBeUndefined();
+    expect(capturedRequest?.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Hello",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("resumes with stateful item history and only sends incremental external input in state mode", async () => {
     const requests: MockCallModelRequest[] = [];
 
     const provider = new OpenRouterProvider({
@@ -312,27 +411,27 @@ describe("OpenRouterProvider", () => {
           getText: async () => {
             if (requests.length === 1) {
               await request.state?.save?.({
-                  id: "session-2",
-                  messages: [
-                    {
-                      role: "user",
-                      content: "Start",
-                    },
-                    {
-                      role: "assistant",
-                      content: "I will use a tool.",
-                    },
-                    {
-                      type: "function_call",
-                      callId: "call_abc",
-                      name: "echo",
-                      arguments: JSON.stringify({ text: "hello" }),
-                    },
-                  ],
-                  status: "in_progress",
-                  createdAt: 0,
-                  updatedAt: 0,
-                });
+                id: "session-2",
+                messages: [
+                  {
+                    role: "user",
+                    content: "Start",
+                  },
+                  {
+                    role: "assistant",
+                    content: "I will use a tool.",
+                  },
+                  {
+                    type: "function_call",
+                    callId: "call_abc",
+                    name: "echo",
+                    arguments: JSON.stringify({ text: "hello" }),
+                  },
+                ],
+                status: "in_progress",
+                createdAt: 0,
+                updatedAt: 0,
+              });
 
               return "I will use a tool.";
             }
@@ -351,6 +450,9 @@ describe("OpenRouterProvider", () => {
               : [],
         };
       }),
+      continuation: {
+        strategy: "state",
+      },
     });
 
     await provider.generate({
@@ -364,6 +466,7 @@ describe("OpenRouterProvider", () => {
         },
       ],
       tools: [createEchoTool()],
+      previousSessionMetadata: createMetadata(),
     });
 
     await provider.generate({
@@ -396,11 +499,13 @@ describe("OpenRouterProvider", () => {
         },
       ],
       tools: [createEchoTool()],
+      previousSessionMetadata: createMetadata(),
     });
 
     expect(requests).toHaveLength(2);
     const firstRequest = requests[0];
     expect(firstRequest).toBeDefined();
+    expect(firstRequest?.state).toBeDefined();
     expect(firstRequest?.input).toEqual([
       {
         type: "message",
@@ -428,11 +533,161 @@ describe("OpenRouterProvider", () => {
           content: "Start",
         },
         {
+          role: "assistant",
+          content: "I will use a tool.",
+        },
+        {
           type: "function_call_output",
           callId: "call_abc",
-          output: JSON.stringify({ echoed: "hello" }),
+          output: JSON.stringify({ ok: true, output: { echoed: "hello" } }),
         },
       ]),
     );
   });
 });
+
+  it("invalidates native state when prompt hash changes in hybrid mode", async () => {
+    const stateStore = createMemoryStateStore();
+    await stateStore.save("session-invalidated", {
+      state: {
+        id: "session-invalidated",
+        messages: [
+          {
+            role: "user",
+            content: "Old state",
+          },
+        ],
+        status: "complete",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      metadata: {
+        model: "openai/gpt-5-mini",
+        promptHash: "old-prompt",
+        toolsetHash: "toolset-hash-1",
+      },
+    });
+
+    let capturedRequest: MockCallModelRequest | undefined;
+    const provider = new OpenRouterProvider({
+      client: createMockClient((request) => {
+        capturedRequest = request;
+        return {
+          getText: async () => "done",
+          getToolCalls: async () => [],
+        };
+      }),
+      continuation: {
+        strategy: "hybrid",
+        stateStore,
+      },
+    });
+
+    await provider.generate({
+      sessionId: "session-invalidated",
+      model: "openai/gpt-5-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are helpful.",
+          date: new Date("2025-01-01T00:00:00.000Z"),
+        },
+        {
+          role: "user",
+          content: "New input",
+          date: new Date("2025-01-01T00:00:01.000Z"),
+        },
+      ],
+      tools: [],
+      previousSessionMetadata: createMetadata({ promptHash: "new-prompt" }),
+    });
+
+    expect(stateStore.clear).toHaveBeenCalledWith("session-invalidated");
+    expect(capturedRequest?.input).toEqual([
+      {
+        id: "system-1735689600000-0",
+        type: "message",
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: "You are helpful.",
+          },
+        ],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "New input",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("optionally keeps native state across model changes", async () => {
+    const stateStore = createMemoryStateStore();
+    await stateStore.save("session-model-lenient", {
+      state: {
+        id: "session-model-lenient",
+        messages: [
+          {
+            role: "user",
+            content: "Start",
+          },
+        ],
+        status: "in_progress",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      metadata: {
+        model: "openai/gpt-5-mini",
+        promptHash: "prompt-hash-1",
+        toolsetHash: "toolset-hash-1",
+      },
+    });
+
+    let capturedRequest: MockCallModelRequest | undefined;
+    const provider = new OpenRouterProvider({
+      client: createMockClient((request) => {
+        capturedRequest = request;
+        return {
+          getText: async () => "done",
+          getToolCalls: async () => [],
+        };
+      }),
+      continuation: {
+        strategy: "hybrid",
+        stateStore,
+        invalidateOnModelChange: false,
+      },
+    });
+
+    await provider.generate({
+      sessionId: "session-model-lenient",
+      model: "anthropic/claude-3.5-sonnet",
+      messages: [
+        {
+          role: "system",
+          content: "You are helpful.",
+          date: new Date("2025-01-01T00:00:00.000Z"),
+        },
+        {
+          role: "user",
+          content: "Follow up",
+          date: new Date("2025-01-01T00:00:01.000Z"),
+        },
+      ],
+      tools: [],
+      previousSessionMetadata: createMetadata({
+        model: "anthropic/claude-3.5-sonnet",
+      }),
+    });
+
+    expect(stateStore.clear).not.toHaveBeenCalled();
+    expect(capturedRequest?.input).toEqual([]);
+    expect(capturedRequest?.state).toBeDefined();
+  });

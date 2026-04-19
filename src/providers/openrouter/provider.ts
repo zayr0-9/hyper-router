@@ -5,6 +5,7 @@ import {
 import { z } from "zod/v4";
 
 import type { ModelProvider } from "../../core/providers.js";
+import type { SessionMetadata } from "../../core/storage.js";
 import type { ToolDefinition } from "../../core/tool.js";
 import type { Message, ModelResponse, ToolCall } from "../../core/types.js";
 import { toInputItems } from "./items.js";
@@ -15,17 +16,49 @@ import {
 } from "./state.js";
 import type {
   OpenRouterClientLike,
+  OpenRouterContinuationStrategy,
   OpenRouterInputItem,
   OpenRouterProviderOptions,
+  OpenRouterStateEnvelope,
+  OpenRouterStateStore,
   OpenRouterToolCallLike,
-  SessionStateRecord,
 } from "./types.js";
+
+interface SessionProgressRecord {
+  syncedExternalMessageCount: number;
+}
+
+class InMemoryOpenRouterStateStore implements OpenRouterStateStore {
+  private readonly states = new Map<string, Awaited<ReturnType<OpenRouterStateStore["load"]>>>();
+
+  async load(sessionId: string) {
+    return this.states.get(sessionId) ?? null;
+  }
+
+  async save(sessionId: string, envelope: Parameters<OpenRouterStateStore["save"]>[1]) {
+    this.states.set(sessionId, JSON.parse(JSON.stringify(envelope)) as Parameters<OpenRouterStateStore["save"]>[1]);
+  }
+
+  async clear(sessionId: string) {
+    this.states.delete(sessionId);
+  }
+}
 
 export class OpenRouterProvider implements ModelProvider {
   private readonly client: OpenRouterClientLike;
-  private readonly sessions = new Map<string, SessionStateRecord>();
+  private readonly continuationStrategy: OpenRouterContinuationStrategy;
+  private readonly stateStore: OpenRouterStateStore | undefined;
+  private readonly invalidateOnModelChange: boolean;
+  private readonly sessionProgress = new Map<string, SessionProgressRecord>();
 
   constructor(options: OpenRouterProviderOptions = {}) {
+    this.continuationStrategy = options.continuation?.strategy ?? (options.continuation?.stateStore ? "hybrid" : "transcript");
+    this.stateStore =
+      this.continuationStrategy === "transcript"
+        ? undefined
+        : (options.continuation?.stateStore ?? new InMemoryOpenRouterStateStore());
+    this.invalidateOnModelChange = options.continuation?.invalidateOnModelChange ?? true;
+
     if (options.client) {
       this.client = options.client;
       return;
@@ -46,6 +79,7 @@ export class OpenRouterProvider implements ModelProvider {
     model: string;
     messages: Message[];
     tools: ToolDefinition<any, any>[];
+    previousSessionMetadata?: SessionMetadata | null;
   }): Promise<ModelResponse> {
     const toolDefs = input.tools.map((tool) =>
       openRouterTool({
@@ -57,27 +91,59 @@ export class OpenRouterProvider implements ModelProvider {
     );
 
     const sessionId = input.sessionId;
-    const sessionRecord = sessionId ? this.getSessionRecord(sessionId) : undefined;
+    const useState = Boolean(sessionId && this.stateStore && this.continuationStrategy !== "transcript");
+    const externalMessages = getExternalMessages(input.messages);
+    const stateMetadata = this.toStateMetadata(input.previousSessionMetadata, input.model);
 
-    if (sessionRecord && getExternalMessages(input.messages).length < sessionRecord.syncedExternalMessageCount) {
-      sessionRecord.state = null;
-      sessionRecord.syncedExternalMessageCount = 0;
+    let syncedExternalMessageCount = 0;
+    let hasExistingState = false;
+
+    if (useState && sessionId) {
+      const progress = this.getSessionProgress(sessionId);
+      syncedExternalMessageCount = progress.syncedExternalMessageCount;
+
+      if (externalMessages.length < syncedExternalMessageCount) {
+        await this.clearSessionState(sessionId, progress);
+        syncedExternalMessageCount = 0;
+      }
+
+      const existingEnvelope = await this.stateStore!.load(sessionId);
+      if (existingEnvelope && this.shouldInvalidateState(existingEnvelope, stateMetadata)) {
+        await this.clearSessionState(sessionId, progress);
+      }
+
+      const currentEnvelope = await this.stateStore!.load(sessionId);
+      hasExistingState = Boolean(currentEnvelope?.state);
+
+      if (hasExistingState) {
+        syncedExternalMessageCount = await syncExternalMessagesIntoState({
+          sessionId,
+          stateStore: this.stateStore!,
+          messages: input.messages,
+          syncedExternalMessageCount,
+          metadata: stateMetadata,
+        });
+        progress.syncedExternalMessageCount = syncedExternalMessageCount;
+      }
     }
 
-    const hasExistingState = Boolean(sessionRecord?.state);
+    const requestInput: OpenRouterInputItem[] =
+      useState && hasExistingState
+        ? []
+        : this.continuationStrategy === "state"
+          ? toInputItems(externalMessages)
+          : toInputItems(input.messages);
 
-    if (sessionRecord?.state) {
-      syncExternalMessagesIntoState(sessionRecord, input.messages);
-    }
-
-    const requestInput: OpenRouterInputItem[] = hasExistingState ? [] : toInputItems(input.messages);
-
-    const callResult = sessionId
+    const callResult = useState && sessionId
       ? this.client.callModel({
           model: input.model,
           input: requestInput,
           tools: toolDefs,
-          state: createStateAccessor<typeof toolDefs>(sessionRecord!),
+          state: createStateAccessor<typeof toolDefs>({
+            sessionId,
+            stateStore: this.stateStore!,
+            metadata: stateMetadata,
+          }),
         })
       : this.client.callModel({
           model: input.model,
@@ -88,8 +154,8 @@ export class OpenRouterProvider implements ModelProvider {
     const [text, toolCalls] = await Promise.all([callResult.getText(), callResult.getToolCalls()]);
     const normalizedToolCalls = this.normalizeToolCalls(toolCalls as OpenRouterToolCallLike[]);
 
-    if (sessionRecord) {
-      sessionRecord.syncedExternalMessageCount = getExternalMessages(input.messages).length;
+    if (useState && sessionId) {
+      this.getSessionProgress(sessionId).syncedExternalMessageCount = externalMessages.length;
     }
 
     const response: ModelResponse = {
@@ -132,18 +198,53 @@ export class OpenRouterProvider implements ModelProvider {
     }));
   }
 
-  private getSessionRecord(sessionId: string): SessionStateRecord {
-    const existing = this.sessions.get(sessionId);
+  private toStateMetadata(
+    previousSessionMetadata: SessionMetadata | null | undefined,
+    model: string,
+  ): Pick<SessionMetadata, "model" | "promptHash" | "toolsetHash"> {
+    return {
+      model,
+      ...(previousSessionMetadata?.promptHash ? { promptHash: previousSessionMetadata.promptHash } : {}),
+      ...(previousSessionMetadata?.toolsetHash ? { toolsetHash: previousSessionMetadata.toolsetHash } : {}),
+    };
+  }
+
+  private shouldInvalidateState(
+    envelope: OpenRouterStateEnvelope,
+    metadata: Pick<SessionMetadata, "model" | "promptHash" | "toolsetHash">,
+  ): boolean {
+    const stored = envelope.metadata;
+    if (!stored) {
+      return false;
+    }
+
+    if (stored.promptHash !== metadata.promptHash || stored.toolsetHash !== metadata.toolsetHash) {
+      return true;
+    }
+
+    if (this.invalidateOnModelChange && stored.model !== metadata.model) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private async clearSessionState(sessionId: string, progress?: SessionProgressRecord): Promise<void> {
+    await this.stateStore?.clear?.(sessionId);
+    (progress ?? this.getSessionProgress(sessionId)).syncedExternalMessageCount = 0;
+  }
+
+  private getSessionProgress(sessionId: string): SessionProgressRecord {
+    const existing = this.sessionProgress.get(sessionId);
     if (existing) {
       return existing;
     }
 
-    const record: SessionStateRecord = {
-      state: null,
+    const record: SessionProgressRecord = {
       syncedExternalMessageCount: 0,
     };
 
-    this.sessions.set(sessionId, record);
+    this.sessionProgress.set(sessionId, record);
     return record;
   }
 }

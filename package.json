@@ -1,0 +1,55 @@
+{
+  "name": "simple-agent",
+  "version": "0.1.0",
+  "description": "A minimal Node-first TypeScript agent runtime SDK boilerplate.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "dev": "tsx examples/basic.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:openrouter:text": "tsx examples/openrouter-smoke.ts",
+    "smoke:openrouter:tool": "tsx examples/openrouter-tool-smoke.ts",
+    "smoke:openrouter:chain": "tsx examples/openrouter-tool-chain-smoke.ts",
+    "smoke:openrouter:runtime": "tsx examples/openrouter.ts",
+    "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path simple-agent-0.1.0.tgz) { Remove-Item -Force simple-agent-0.1.0.tgz }\"",
+    "prepublishOnly": "npm run check && npm run build"
+  },
+  "keywords": [
+    "agent",
+    "sdk",
+    "runtime",
+    "typescript",
+    "node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@openrouter/agent": "^0.3.2",
+    "zod": "^4.1.12"
+  }
+}

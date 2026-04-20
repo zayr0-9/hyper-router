@@ -10,7 +10,7 @@ export interface OpenRouterClientLike {
   callModel: OpenRouter["callModel"];
 }
 
-export type OpenRouterContinuationStrategy = "transcript" | "state" | "hybrid";
+export type OpenRouterContinuationStrategy = "transcript" | "state" | "hybrid" | "ephemeral";
 
 export type SerializedOpenRouterState = ConversationState;
 

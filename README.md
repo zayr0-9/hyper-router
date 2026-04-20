@@ -237,6 +237,80 @@ Run the OpenRouter runtime example locally:
 npx tsx examples/openrouter.ts
 ```
 
+### OpenRouter image outputs
+
+When an OpenRouter image-capable model returns a final generated image, the provider exposes it on `ModelResponse.generatedImages`.
+
+Example shape:
+
+```ts
+const result = await provider.generate({
+  model: "google/gemini-2.5-flash-image",
+  messages: [
+    {
+      role: "user",
+      content: "Generate a small pixel-art red square.",
+      date: new Date(),
+    },
+  ],
+  tools: [],
+});
+
+console.log(result.generatedImages);
+// [
+//   {
+//     dataUrl: "data:image/png;base64,...",
+//     mimeType: "image/png"
+//   }
+// ]
+```
+
+This library does **not** save image files for you. It only exposes the final image payload so your website/app can store it however you want.
+
+A browser helper for converting a `dataUrl` into a `Blob`:
+
+```ts
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  if (!header || !base64) {
+    throw new Error("Invalid data URL.");
+  }
+
+  const mimeType = /^data:([^;]+)/.exec(header)?.[1] ?? "application/octet-stream";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new Blob([bytes], { type: mimeType });
+}
+```
+
+Example upload flow in a website:
+
+```ts
+const image = result.generatedImages?.[0];
+
+if (image?.dataUrl) {
+  const blob = dataUrlToBlob(image.dataUrl);
+  const file = new File([blob], `generated-${Date.now()}.png`, {
+    type: image.mimeType ?? blob.type ?? "image/png",
+  });
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  await fetch("/api/uploads", {
+    method: "POST",
+    body: formData,
+  });
+}
+```
+
+If the upstream provider returns a remote image URL instead of a data URL, it will be exposed as `generatedImages[].url`.
+
 ### OpenRouter replay contract
 
 For transcript-backed continuation, replay should follow this rule:

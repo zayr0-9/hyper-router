@@ -9,6 +9,7 @@ export interface ModelProvider {
     messages: Message[];
     tools: ToolDefinition<any, any>[];
     previousSessionMetadata?: SessionMetadata | null;
+    ephemeral?: boolean;
   }): Promise<ModelResponse>;
 }
 
@@ -19,6 +20,7 @@ export class StubProvider implements ModelProvider {
     messages: Message[];
     tools: ToolDefinition<any, any>[];
     previousSessionMetadata?: SessionMetadata | null;
+    ephemeral?: boolean;
   }): Promise<ModelResponse> {
     const lastUserMessage = [...input.messages].reverse().find((message) => message.role === "user");
 

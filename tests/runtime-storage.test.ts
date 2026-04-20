@@ -306,3 +306,80 @@ it("can resume a paused tool chain from persisted transcript with a fresh runtim
     },
   ]);
 });
+
+
+describe("AgentRuntime ephemeral mode", () => {
+  it("does not load prior transcript or persist transcript, run state, or metadata", async () => {
+    const capturedRuns: Message[][] = [];
+
+    const provider: ModelProvider = {
+      generate: vi.fn(async ({ messages, ephemeral, previousSessionMetadata }): Promise<ModelResponse> => {
+        capturedRuns.push(messages.map((message) => ({ ...message })));
+        expect(ephemeral).toBe(true);
+        expect(previousSessionMetadata).toBeNull();
+
+        return {
+          message: {
+            role: "assistant",
+            content: "ephemeral-ack",
+            date: new Date("2025-01-01T00:00:30.000Z"),
+          },
+          stopReason: "completed",
+        };
+      }),
+    };
+
+    const storage = new InMemoryStorage();
+    await storage.saveMessages("ephemeral-session", [
+      {
+        role: "user",
+        content: "Persisted hello",
+        date: new Date("2025-01-01T00:00:00.000Z"),
+      },
+      {
+        role: "assistant",
+        content: "Persisted ack",
+        date: new Date("2025-01-01T00:00:01.000Z"),
+      },
+    ]);
+    await storage.setSessionMetadata?.("ephemeral-session", {
+      agentName: "existing-agent",
+      model: "existing-model",
+      promptHash: "existing-prompt-hash",
+    });
+
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "ephemeral-agent",
+        instructions: "Ephemeral prompt",
+        model: "stub-model",
+      }),
+      provider,
+      storage,
+    });
+
+    const result = await runtime.run({
+      sessionId: "ephemeral-session",
+      input: "Fresh input only",
+      ephemeral: true,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(capturedRuns).toHaveLength(1);
+    expect(simplifyMessages(capturedRuns[0] ?? [])).toEqual([
+      { role: "system", content: "Ephemeral prompt" },
+      { role: "user", content: "Fresh input only" },
+    ]);
+
+    expect(simplifyMessages(await storage.loadMessages("ephemeral-session"))).toEqual([
+      { role: "user", content: "Persisted hello" },
+      { role: "assistant", content: "Persisted ack" },
+    ]);
+
+    expect(await storage.getSessionMetadata?.("ephemeral-session")).toMatchObject({
+      agentName: "existing-agent",
+      model: "existing-model",
+      promptHash: "existing-prompt-hash",
+    });
+  });
+});

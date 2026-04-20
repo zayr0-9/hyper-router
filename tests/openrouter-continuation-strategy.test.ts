@@ -56,6 +56,7 @@ function createMockClient(
   implementation?: (request: MockCallModelRequest) => {
     getText: () => Promise<string>;
     getToolCalls: () => Promise<unknown[]>;
+    getResponse: () => Promise<{ output: Array<{ type: string; result?: string | null }> }>;
   },
 ): OpenRouterClientLike {
   return {
@@ -64,6 +65,7 @@ function createMockClient(
         (() => ({
           getText: async () => "",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         })),
     ) as unknown as OpenRouterClientLike["callModel"],
   };
@@ -92,6 +94,7 @@ describe("OpenRouter continuation strategy selection", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
     });
@@ -141,6 +144,7 @@ describe("OpenRouter continuation strategy selection", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: { stateStore },
@@ -190,6 +194,7 @@ describe("OpenRouter continuation strategy selection", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: { strategy: "state" },
@@ -240,6 +245,7 @@ describe("OpenRouter continuation invalidation rules", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: { strategy: "hybrid", stateStore },
@@ -337,6 +343,7 @@ describe("OpenRouter continuation invalidation rules", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: {
@@ -357,5 +364,112 @@ describe("OpenRouter continuation invalidation rules", () => {
     expect(stateStore.clear).not.toHaveBeenCalled();
     expect(request?.state).toBeDefined();
     expect(request?.input).toEqual([]);
+  });
+});
+
+
+describe("OpenRouter ephemeral mode", () => {
+  it("does not attach state when invoked ephemerally for a single execution", async () => {
+    let request: MockCallModelRequest | undefined;
+    const stateStore = createMemoryStateStore();
+    const provider = new OpenRouterProvider({
+      client: createMockClient((captured) => {
+        request = captured;
+        return {
+          getText: async () => "done",
+          getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
+        };
+      }),
+      continuation: { strategy: "hybrid", stateStore },
+    });
+
+    await provider.generate({
+      sessionId: "ephemeral-s1",
+      model: "openai/gpt-5-mini",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: createMetadata(),
+      ephemeral: true,
+    });
+
+    expect(request?.state).toBeUndefined();
+    expect(request?.input).toEqual([
+      {
+        id: "system-1735689600000-0",
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: "You are helpful." }],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Start" }],
+      },
+      {
+        id: "assistant-1735689602000-2",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "I will use a tool.", annotations: [] }],
+      },
+      {
+        type: "function_call_output",
+        callId: "call_echo",
+        output: '{"ok":true,"output":{"echoed":"hello"}}',
+      },
+    ]);
+    expect(stateStore.load).not.toHaveBeenCalled();
+    expect(stateStore.save).not.toHaveBeenCalled();
+  });
+
+  it("supports provider-configured ephemeral continuation mode", async () => {
+    let request: MockCallModelRequest | undefined;
+    const provider = new OpenRouterProvider({
+      client: createMockClient((captured) => {
+        request = captured;
+        return {
+          getText: async () => "done",
+          getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
+        };
+      }),
+      continuation: { strategy: "ephemeral" },
+    });
+
+    await provider.generate({
+      sessionId: "ephemeral-s2",
+      model: "openai/gpt-5-mini",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: createMetadata(),
+    });
+
+    expect(request?.state).toBeUndefined();
+    expect(request?.input).toEqual([
+      {
+        id: "system-1735689600000-0",
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: "You are helpful." }],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Start" }],
+      },
+      {
+        id: "assistant-1735689602000-2",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "I will use a tool.", annotations: [] }],
+      },
+      {
+        type: "function_call_output",
+        callId: "call_echo",
+        output: '{"ok":true,"output":{"echoed":"hello"}}',
+      },
+    ]);
   });
 });

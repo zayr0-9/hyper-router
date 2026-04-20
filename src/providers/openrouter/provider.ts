@@ -7,7 +7,7 @@ import { z } from "zod/v4";
 import type { ModelProvider } from "../../core/providers.js";
 import type { SessionMetadata } from "../../core/storage.js";
 import type { ToolDefinition } from "../../core/tool.js";
-import type { Message, ModelResponse, ToolCall } from "../../core/types.js";
+import type { GeneratedImage, Message, ModelResponse, ToolCall } from "../../core/types.js";
 import { toInputItems } from "./items.js";
 import {
   createStateAccessor,
@@ -54,7 +54,7 @@ export class OpenRouterProvider implements ModelProvider {
   constructor(options: OpenRouterProviderOptions = {}) {
     this.continuationStrategy = options.continuation?.strategy ?? (options.continuation?.stateStore ? "hybrid" : "transcript");
     this.stateStore =
-      this.continuationStrategy === "transcript"
+      this.continuationStrategy === "transcript" || this.continuationStrategy === "ephemeral"
         ? undefined
         : (options.continuation?.stateStore ?? new InMemoryOpenRouterStateStore());
     this.invalidateOnModelChange = options.continuation?.invalidateOnModelChange ?? true;
@@ -80,6 +80,7 @@ export class OpenRouterProvider implements ModelProvider {
     messages: Message[];
     tools: ToolDefinition<any, any>[];
     previousSessionMetadata?: SessionMetadata | null;
+    ephemeral?: boolean;
   }): Promise<ModelResponse> {
     const toolDefs = input.tools.map((tool) =>
       openRouterTool({
@@ -91,7 +92,8 @@ export class OpenRouterProvider implements ModelProvider {
     );
 
     const sessionId = input.sessionId;
-    const useState = Boolean(sessionId && this.stateStore && this.continuationStrategy !== "transcript");
+    const isEphemeral = input.ephemeral === true || this.continuationStrategy === "ephemeral";
+    const useState = Boolean(!isEphemeral && sessionId && this.stateStore && this.continuationStrategy !== "transcript");
     const externalMessages = getExternalMessages(input.messages);
     const stateMetadata = this.toStateMetadata(input.previousSessionMetadata, input.model);
 
@@ -151,8 +153,13 @@ export class OpenRouterProvider implements ModelProvider {
           tools: toolDefs,
         });
 
-    const [text, toolCalls] = await Promise.all([callResult.getText(), callResult.getToolCalls()]);
+    const [text, toolCalls, fullResponse] = await Promise.all([
+      callResult.getText(),
+      callResult.getToolCalls(),
+      callResult.getResponse(),
+    ]);
     const normalizedToolCalls = this.normalizeToolCalls(toolCalls as OpenRouterToolCallLike[]);
+    const generatedImages = this.extractGeneratedImages(fullResponse as { output?: Array<{ type?: unknown; result?: unknown }> });
 
     if (useState && sessionId) {
       this.getSessionProgress(sessionId).syncedExternalMessageCount = externalMessages.length;
@@ -161,6 +168,7 @@ export class OpenRouterProvider implements ModelProvider {
     const response: ModelResponse = {
       toolCalls: normalizedToolCalls,
       stopReason: normalizedToolCalls.length > 0 ? "tool_calls" : "completed",
+      ...(generatedImages.length > 0 ? { generatedImages } : {}),
     };
 
     if (text && text.trim().length > 0) {
@@ -196,6 +204,27 @@ export class OpenRouterProvider implements ModelProvider {
       toolName: String(toolCall.name ?? "unknown_tool"),
       args: toolCall.arguments ?? {},
     }));
+  }
+
+  protected extractGeneratedImages(response: {
+    output?: Array<{ type?: unknown; result?: unknown }>;
+  }): GeneratedImage[] {
+    return (response.output ?? [])
+      .filter((item) => item.type === "image_generation_call" && typeof item.result === "string" && item.result.length > 0)
+      .map((item) => {
+        const result = item.result as string;
+        if (result.startsWith("data:")) {
+          const mimeType = /^data:([^;,]+)/.exec(result)?.[1];
+          return {
+            dataUrl: result,
+            ...(mimeType ? { mimeType } : {}),
+          } satisfies GeneratedImage;
+        }
+
+        return {
+          url: result,
+        } satisfies GeneratedImage;
+      });
   }
 
   private toStateMetadata(

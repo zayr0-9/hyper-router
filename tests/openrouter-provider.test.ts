@@ -49,6 +49,7 @@ function createEchoTool(): ToolDefinition<{ text: string }, { echoed: string }> 
 type MockCallModelResult = {
   getText: () => Promise<string>;
   getToolCalls: () => Promise<unknown[]>;
+  getResponse: () => Promise<{ output: Array<{ type: string; result?: string | null }> }>;
 };
 
 type MockStateAccessor = {
@@ -99,6 +100,7 @@ function createMockClient(
         (() => ({
           getText: async () => "",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         })),
     ) as unknown as OpenRouterClientLike["callModel"],
   };
@@ -251,9 +253,14 @@ describe("OpenRouterProvider", () => {
       },
     ]);
 
+    const getResponse = vi.fn(async () => ({
+      output: [],
+    }));
+
     const callModel = vi.fn(() => ({
       getText,
       getToolCalls,
+      getResponse,
     }));
 
     const provider = new OpenRouterProvider({
@@ -281,11 +288,43 @@ describe("OpenRouterProvider", () => {
     expect(result.stopReason).toBe("tool_calls");
   });
 
+  it("exposes generated images on ModelResponse", async () => {
+    const provider = new OpenRouterProvider({
+      client: createMockClient(() => ({
+        getText: async () => "Here is your image.",
+        getToolCalls: async () => [],
+        getResponse: async () => ({
+          output: [
+            {
+              type: "image_generation_call",
+              result: "data:image/png;base64,abc123",
+            },
+          ],
+        }),
+      })),
+    });
+
+    const result = await provider.generate({
+      model: "google/gemini-2.5-flash-image",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.generatedImages).toEqual([
+      {
+        dataUrl: "data:image/png;base64,abc123",
+        mimeType: "image/png",
+      },
+    ]);
+  });
+
   it("handles empty text with no tool calls", async () => {
     const provider = new OpenRouterProvider({
       client: createMockClient(() => ({
         getText: async () => "   ",
         getToolCalls: async () => [],
+        getResponse: async () => ({ output: [] }),
       })),
     });
 
@@ -316,6 +355,7 @@ describe("OpenRouterProvider", () => {
               arguments: { text: "hello" },
             },
           ],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: {
@@ -368,6 +408,7 @@ describe("OpenRouterProvider", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
     });
@@ -448,6 +489,7 @@ describe("OpenRouterProvider", () => {
                   },
                 ]
               : [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: {
@@ -575,6 +617,7 @@ describe("OpenRouterProvider", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: {
@@ -657,6 +700,7 @@ describe("OpenRouterProvider", () => {
         return {
           getText: async () => "done",
           getToolCalls: async () => [],
+          getResponse: async () => ({ output: [] }),
         };
       }),
       continuation: {

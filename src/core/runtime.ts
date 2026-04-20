@@ -21,12 +21,17 @@ export class AgentRuntime {
 
   async run(input: AgentRunInput): Promise<RuntimeResult> {
     const maxSteps = input.maxSteps ?? 5;
-    const previousMessages = (await this.config.storage.loadMessages(input.sessionId)).filter(
-      (message) => message.role !== "system",
-    );
-    const previousSessionMetadata = this.config.storage.getSessionMetadata
-      ? await this.config.storage.getSessionMetadata(input.sessionId)
-      : null;
+    const isEphemeral = input.ephemeral ?? false;
+    const previousMessages = isEphemeral
+      ? []
+      : (await this.config.storage.loadMessages(input.sessionId)).filter(
+          (message) => message.role !== "system",
+        );
+    const previousSessionMetadata = isEphemeral
+      ? null
+      : this.config.storage.getSessionMetadata
+        ? await this.config.storage.getSessionMetadata(input.sessionId)
+        : null;
 
     const baseMessages: Message[] = this.config.agent.buildMessages
       ? await this.config.agent.buildMessages(input.input)
@@ -47,6 +52,7 @@ export class AgentRuntime {
         messages,
         tools: this.config.agent.tools ?? [],
         previousSessionMetadata,
+        ephemeral: isEphemeral,
       });
 
       if (response.message) {
@@ -69,14 +75,16 @@ export class AgentRuntime {
       }
     }
 
-    const transcriptMessages = messages.filter((message) => message.role !== "system");
+    if (!isEphemeral) {
+      const transcriptMessages = messages.filter((message) => message.role !== "system");
 
-    await this.config.storage.saveMessages(input.sessionId, transcriptMessages);
-    await this.config.storage.saveRun({
-      sessionId: input.sessionId,
-      status,
-    });
-    await this.updateSessionMetadata(input.sessionId);
+      await this.config.storage.saveMessages(input.sessionId, transcriptMessages);
+      await this.config.storage.saveRun({
+        sessionId: input.sessionId,
+        status,
+      });
+      await this.updateSessionMetadata(input.sessionId);
+    }
 
     return { status, messages };
   }

@@ -19,6 +19,7 @@ export interface AgentRunInput {
   sessionId: string;
   input: string;
   maxSteps?: number;
+  ephemeral?: boolean;
 }
 
 export type RunStatus =
@@ -54,10 +55,17 @@ export interface ToolCall {
   args: unknown;
 }
 
+export interface GeneratedImage {
+  dataUrl?: string;
+  url?: string;
+  mimeType?: string;
+}
+
 export interface ModelResponse {
   message?: Message;
   toolCalls?: ToolCall[];
   stopReason?: string;
+  generatedImages?: GeneratedImage[];
 }
 
 export interface AgentContext {

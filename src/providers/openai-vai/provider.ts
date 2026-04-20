@@ -43,6 +43,7 @@ export class OpenAIVAIProvider implements ModelProvider {
     messages: Message[];
     tools: ToolDefinition<any, any>[];
     previousSessionMetadata?: SessionMetadata | null;
+    ephemeral?: boolean;
   }): Promise<ModelResponse> {
     const tools = this.toAiSdkTools(input.tools);
     const result = await this.generateTextImpl({

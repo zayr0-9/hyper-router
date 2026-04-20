@@ -1,5 +1,5 @@
 {
-  "name": "simple-agent",
+  "name": "hyper-router",
   "version": "0.1.0",
   "description": "A minimal Node-first TypeScript agent runtime SDK boilerplate.",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "smoke:amazon-bedrock-vai:tool": "tsx examples/amazon-bedrock-vai-tool-smoke.ts",
     "smoke:amazon-bedrock-vai:chain": "tsx examples/amazon-bedrock-vai-tool-chain-smoke.ts",
     "smoke:amazon-bedrock-vai:runtime": "tsx examples/amazon-bedrock-vai.ts",
-    "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path simple-agent-0.1.0.tgz) { Remove-Item -Force simple-agent-0.1.0.tgz }\"",
+    "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path hyper-router-0.1.0.tgz) { Remove-Item -Force hyper-router-0.1.0.tgz }\"",
     "prepublishOnly": "npm run check && npm run build"
   },
   "keywords": [

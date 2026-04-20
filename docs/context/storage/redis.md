@@ -1,6 +1,6 @@
 # Redis storage context
 
-Redis storage is not implemented yet, but it is a plausible future backend for `simple-agent`.
+Redis storage is not implemented yet, but it is a plausible future backend for `hyper-router`.
 
 This document describes how developers should think about that option.
 

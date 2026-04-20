@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 async function createStorage() {
-  const dir = await mkdtemp(join(tmpdir(), "simple-agent-sqlite-storage-"));
+  const dir = await mkdtemp(join(tmpdir(), "hyper-router-sqlite-storage-"));
   tempDirs.push(dir);
 
   const filePath = join(dir, "storage.sqlite");

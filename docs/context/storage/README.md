@@ -1,6 +1,6 @@
 # Storage context
 
-This folder exists to help developers understand how storage works in `simple-agent`, what is stable today, and how new backends should behave.
+This folder exists to help developers understand how storage works in `hyper-router`, what is stable today, and how new backends should behave.
 
 ## Current storage model
 

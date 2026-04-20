@@ -38,7 +38,7 @@ async function createDemoRuntime() {
 }
 
 async function main(): Promise<void> {
-  console.log("simple-agent JSON storage resume demo");
+  console.log("hyper-router JSON storage resume demo");
   console.log(`Storage file: ${storagePath}`);
   console.log(`Session ID: ${sessionId}`);
 

@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     throw new Error("Missing OPENROUTER_API_KEY. Set it before running this demo.");
   }
 
-  console.log("simple-agent real API demo");
+  console.log("hyper-router real API demo");
   console.log(`Model: ${model}`);
   console.log(`Storage file: ${storagePath}`);
   console.log(`Session ID: ${sessionId}`);

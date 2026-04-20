@@ -1,4 +1,4 @@
-# simple-agent
+# hyper-router
 
 A minimal **TypeScript agent runtime SDK** with pluggable providers, tools, and storage.
 
@@ -13,7 +13,7 @@ It gives you:
 - multiple storage backends for transcript persistence and resume flows
 - a small surface area so you can focus on your product instead of provider/runtime glue
 
-`simple-agent` is intentionally minimal, but it still aims to give you flexibility in how you configure agents, models, providers, storage, and continuation strategies.
+`hyper-router` is intentionally minimal, but it still aims to give you flexibility in how you configure agents, models, providers, storage, and continuation strategies.
 
 ## Current status
 
@@ -162,7 +162,7 @@ import {
   defineTool,
   InMemoryStorage,
   StubProvider,
-} from "simple-agent";
+} from "hyper-router";
 
 const echoTool = defineTool<{ text: string }, { echoed: string }>({
   name: "echo",
@@ -216,7 +216,7 @@ import {
   defineAgent,
   InMemoryStorage,
   OpenRouterProvider,
-} from "simple-agent";
+} from "hyper-router";
 
 const agent = defineAgent({
   name: "my-agent",
@@ -441,7 +441,7 @@ The built-in storage backends preserve the same transcript behavior:
 ### JSON example
 
 ```ts
-import { JsonStorage } from "simple-agent";
+import { JsonStorage } from "hyper-router";
 
 const storage = new JsonStorage({
   filePath: "./tmp/agent-storage.json",
@@ -457,7 +457,7 @@ npm run demo:json-resume
 ### SQLite example
 
 ```ts
-import { SqliteStorage } from "simple-agent";
+import { SqliteStorage } from "hyper-router";
 
 const storage = new SqliteStorage({
   filePath: ".tmp/agent.sqlite",
@@ -473,7 +473,7 @@ npm run demo:sqlite-resume
 ### Postgres example
 
 ```ts
-import { PostgresStorage } from "simple-agent";
+import { PostgresStorage } from "hyper-router";
 
 const storage = new PostgresStorage({
   connectionString: process.env.DATABASE_URL,
@@ -612,7 +612,7 @@ import {
   defineAgent,
   InMemoryStorage,
   OpenAIVAIProvider,
-} from "simple-agent";
+} from "hyper-router";
 
 const agent = defineAgent({
   name: "my-openai-agent",
@@ -696,7 +696,7 @@ import {
   createRuntime,
   defineAgent,
   InMemoryStorage,
-} from "simple-agent";
+} from "hyper-router";
 
 const agent = defineAgent({
   name: "my-bedrock-agent",

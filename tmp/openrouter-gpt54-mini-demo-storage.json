@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "sessions": {
+    "openrouter-gpt54-mini-demo": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Call the echo tool with text='hello from GPT-5.4 Mini demo' and then briefly explain what happened.",
+          "date": "2026-04-19T21:40:07.512Z"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "date": "2026-04-19T21:40:10.147Z",
+          "toolCalls": [
+            {
+              "id": "call_V04H1xxXNAhYjEASv4BFFf3T",
+              "toolName": "echo",
+              "args": {
+                "text": "hello from GPT-5.4 Mini demo"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "{\"ok\":true,\"output\":{\"echoed\":\"hello from GPT-5.4 Mini demo\"}}",
+          "date": "2026-04-19T21:40:10.148Z",
+          "name": "echo",
+          "toolCallId": "call_V04H1xxXNAhYjEASv4BFFf3T"
+        },
+        {
+          "role": "assistant",
+          "content": "I called the echo tool with the requested text, and it returned the same string back:\n\nhello from GPT-5.4 Mini demo\n\nSo what happened is simply that the tool echoed your message exactly as provided.",
+          "date": "2026-04-19T21:40:11.311Z"
+        },
+        {
+          "role": "user",
+          "content": "Continue the conversation. In one sentence, remind me which tool was used and what text it echoed.",
+          "date": "2026-04-19T21:40:11.318Z"
+        },
+        {
+          "role": "assistant",
+          "content": "The echo tool was used, and it echoed: \"hello from GPT-5.4 Mini demo\".",
+          "date": "2026-04-19T21:40:12.298Z"
+        }
+      ],
+      "run": {
+        "sessionId": "openrouter-gpt54-mini-demo",
+        "status": "completed"
+      },
+      "metadata": {
+        "agentName": "openrouter-gpt54-mini-demo-agent",
+        "model": "openai/gpt-5.4-mini",
+        "promptHash": "a3a6b6f309c7ef6c0e2450891150cbb32140f1b3b0742d971d2a06795aecdb21",
+        "promptSnapshot": "You are a helpful assistant. Use the echo tool when the user explicitly asks you to call it. Keep answers concise.",
+        "toolsetHash": "cbeb7b9e33bebc6914efad292b99c95f38ac61b3bf1110d407d0abbc29e94ba4",
+        "updatedAt": "2026-04-19T21:40:12.302Z"
+      }
+    }
+  }
+}

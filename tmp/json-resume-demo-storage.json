@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "sessions": {
+    "json-demo-session": {
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hello from the first run.",
+          "date": "2026-04-19T21:34:09.742Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Stub response from stub-model: Hello from the first run.",
+          "date": "2026-04-19T21:34:09.742Z"
+        },
+        {
+          "role": "user",
+          "content": "Continue the conversation and remind me what I said earlier.",
+          "date": "2026-04-19T21:34:09.747Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Stub response from stub-model: Continue the conversation and remind me what I said earlier.",
+          "date": "2026-04-19T21:34:09.747Z"
+        },
+        {
+          "role": "user",
+          "content": "Hello from the first run.",
+          "date": "2026-04-19T21:35:51.607Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Stub response from stub-model: Hello from the first run.",
+          "date": "2026-04-19T21:35:51.607Z"
+        },
+        {
+          "role": "user",
+          "content": "Continue the conversation and remind me what I said earlier.",
+          "date": "2026-04-19T21:35:51.612Z"
+        },
+        {
+          "role": "assistant",
+          "content": "Stub response from stub-model: Continue the conversation and remind me what I said earlier.",
+          "date": "2026-04-19T21:35:51.612Z"
+        }
+      ],
+      "run": {
+        "sessionId": "json-demo-session",
+        "status": "completed"
+      },
+      "metadata": {
+        "agentName": "json-resume-demo-agent",
+        "model": "stub-model",
+        "promptHash": "6665294426e6141b2bfbdfe5fddc8d787017d630497a6e444f63473436c9bc17",
+        "promptSnapshot": "You are a helpful assistant. Keep answers concise and continue from prior transcript when available.",
+        "toolsetHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "updatedAt": "2026-04-19T21:35:51.614Z"
+      }
+    }
+  }
+}

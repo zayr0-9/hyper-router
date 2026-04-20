@@ -25,10 +25,21 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "demo:json-resume": "tsx examples/json-resume-demo.ts",
+    "demo:sqlite-resume": "tsx examples/sqlite-resume-demo.ts",
+    "demo:openrouter:gpt54-mini": "tsx examples/openrouter-gpt54-mini-demo.ts",
+    "demo:openrouter:gpt54-mini:sqlite": "tsx examples/openrouter-gpt54-mini-sqlite-demo.ts",
     "smoke:openrouter:text": "tsx examples/openrouter-smoke.ts",
     "smoke:openrouter:tool": "tsx examples/openrouter-tool-smoke.ts",
     "smoke:openrouter:chain": "tsx examples/openrouter-tool-chain-smoke.ts",
     "smoke:openrouter:runtime": "tsx examples/openrouter.ts",
+    "smoke:openai:text": "tsx examples/openai-smoke.ts",
+    "smoke:openai:tool": "tsx examples/openai-tool-smoke.ts",
+    "smoke:openai:chain": "tsx examples/openai-tool-chain-smoke.ts",
+    "smoke:amazon-bedrock-vai:text": "tsx examples/amazon-bedrock-vai-smoke.ts",
+    "smoke:amazon-bedrock-vai:tool": "tsx examples/amazon-bedrock-vai-tool-smoke.ts",
+    "smoke:amazon-bedrock-vai:chain": "tsx examples/amazon-bedrock-vai-tool-chain-smoke.ts",
+    "smoke:amazon-bedrock-vai:runtime": "tsx examples/amazon-bedrock-vai.ts",
     "clean": "powershell -NoProfile -Command \"if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path simple-agent-0.1.0.tgz) { Remove-Item -Force simple-agent-0.1.0.tgz }\"",
     "prepublishOnly": "npm run check && npm run build"
   },
@@ -44,12 +55,18 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
+    "@types/pg": "^8.11.10",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^4.0.92",
+    "@ai-sdk/openai": "^3.0.53",
     "@openrouter/agent": "^0.3.2",
+    "ai": "^6.0.168",
+    "pg": "^8.13.1",
+    "sql.js": "^1.14.1",
     "zod": "^4.1.12"
   }
 }

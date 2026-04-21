@@ -194,7 +194,7 @@ class TranscriptOnlyTraceOpenRouterProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<unknown, unknown>[];
+    tools: ToolDefinition<any, unknown>[];
   }): Promise<ModelResponse> {
     const toolDefs = input.tools.map((tool) =>
       openRouterTool({

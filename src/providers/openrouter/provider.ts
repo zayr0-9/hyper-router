@@ -7,7 +7,7 @@ import { z } from "zod/v4";
 import type { ModelProvider } from "../../core/providers.js";
 import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
-import type { ToolDefinition } from "../../core/tool.js";
+import type { AnyToolDefinition } from "../../core/tool.js";
 import type { GeneratedImage, Message, ModelResponse, ToolCall } from "../../core/types.js";
 import { toInputItems } from "./items.js";
 import {
@@ -79,7 +79,7 @@ export class OpenRouterProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<unknown, unknown>[];
+    tools: AnyToolDefinition[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse> {

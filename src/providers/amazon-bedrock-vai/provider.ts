@@ -4,7 +4,7 @@ import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import type { ModelProvider } from "../../core/providers.js";
 import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
-import type { ToolDefinition } from "../../core/tool.js";
+import type { AnyToolDefinition } from "../../core/tool.js";
 import type { Message, ModelResponse, ToolCall } from "../../core/types.js";
 import type {
   AmazonBedrockVAIProviderOptions,
@@ -41,7 +41,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<unknown, unknown>[];
+    tools: AnyToolDefinition[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse> {
@@ -89,7 +89,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
     return response;
   }
 
-  protected toAiSdkTools(tools: ToolDefinition<unknown, unknown>[]): Record<string, unknown> {
+  protected toAiSdkTools(tools: AnyToolDefinition[]): Record<string, unknown> {
     return Object.fromEntries(
       tools.map((toolDefinition) => [
         toolDefinition.name,
@@ -116,7 +116,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
       type: "object",
       properties: {},
       additionalProperties: true,
-    } as FlexibleSchema<Record<string, unknown>>;
+    } as unknown as FlexibleSchema<Record<string, unknown>>;
   }
 
   protected toModelMessages(messages: Message[]): ModelMessage[] {

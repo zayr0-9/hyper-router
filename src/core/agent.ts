@@ -1,11 +1,11 @@
 import type { Message } from "./types.js";
-import type { ToolDefinition } from "./tool.js";
+import type { AnyToolDefinition } from "./tool.js";
 
 export interface AgentDefinition {
   name: string;
   instructions: string;
   model: string;
-  tools?: ToolDefinition<unknown, unknown>[];
+  tools?: AnyToolDefinition[];
   buildMessages?: (input: string) => Promise<Message[]> | Message[];
 }
 

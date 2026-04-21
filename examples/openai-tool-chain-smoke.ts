@@ -1,12 +1,12 @@
 import { z } from "zod/v4";
 
 import {
-  OpenAIVAIProvider,
   createRuntime,
   defineAgent,
   defineTool,
   InMemoryStorage,
 } from "../src/index.js";
+import { OpenAIVAIProvider } from "../src/providers/openai-vai/index.js";
 
 const MODEL = "gpt-5-mini";
 

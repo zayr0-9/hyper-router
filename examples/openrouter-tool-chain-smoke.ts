@@ -12,13 +12,13 @@ import {
   defineAgent,
   defineTool,
   InMemoryStorage,
-  OpenRouterProvider,
   type Message,
   type ModelProvider,
   type ModelResponse,
   type ToolCall,
   type ToolDefinition,
 } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
 import { toInputItems } from "../src/providers/openrouter/items.js";
 
 const MODEL = "openai/gpt-5-mini";
@@ -194,7 +194,7 @@ class TranscriptOnlyTraceOpenRouterProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<any, any>[];
+    tools: ToolDefinition<unknown, unknown>[];
   }): Promise<ModelResponse> {
     const toolDefs = input.tools.map((tool) =>
       openRouterTool({

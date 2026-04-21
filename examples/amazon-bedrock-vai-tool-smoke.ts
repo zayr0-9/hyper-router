@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 
-import { AmazonBedrockVAIProvider, defineTool } from "../src/index.js";
+import { defineTool } from "../src/index.js";
+import { AmazonBedrockVAIProvider } from "../src/providers/amazon-bedrock-vai/index.js";
 import type { Message } from "../src/index.js";
 
 async function main(): Promise<void> {

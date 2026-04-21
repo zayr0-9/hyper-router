@@ -3,9 +3,9 @@ import { join } from "node:path";
 import {
   createRuntime,
   defineAgent,
-  SqliteStorage,
   StubProvider,
 } from "../src/index.js";
+import { SqliteStorage } from "../src/storage/sqlite.js";
 
 const storage = new SqliteStorage({
   filePath: join(process.cwd(), ".tmp", "sqlite-demo.sqlite"),

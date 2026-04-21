@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 import {
-  AmazonBedrockVAIProvider,
   createRuntime,
   defineAgent,
   defineTool,
   InMemoryStorage,
 } from "../src/index.js";
+import { AmazonBedrockVAIProvider } from "../src/providers/amazon-bedrock-vai/index.js";
 
 const echoTool = defineTool<{ text: string }, { echoed: string }>({
   name: "echo",

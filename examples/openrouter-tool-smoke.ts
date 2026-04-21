@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 
-import { OpenRouterProvider, defineTool } from "../src/index.js";
+import { defineTool } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
 import type { Message } from "../src/index.js";
 
 async function main(): Promise<void> {

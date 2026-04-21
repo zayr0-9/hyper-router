@@ -1,12 +1,12 @@
 import { z } from "zod/v4";
 
 import {
-  AmazonBedrockVAIProvider,
   createRuntime,
   defineAgent,
   defineTool,
   InMemoryStorage,
 } from "../src/index.js";
+import { AmazonBedrockVAIProvider } from "../src/providers/amazon-bedrock-vai/index.js";
 
 const MODEL = "anthropic.claude-3-sonnet-20240229-v1:0";
 

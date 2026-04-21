@@ -51,7 +51,65 @@ Requirements:
 
 - Node.js 20+
 
-Install and verify:
+Install from npm:
+
+```bash
+npm install hyper-router
+```
+
+Optional adapter peer dependencies:
+
+```bash
+# OpenRouter provider
+npm install hyper-router @openrouter/agent zod
+
+# OpenAI VAI provider
+npm install hyper-router ai @ai-sdk/openai
+
+# Amazon Bedrock VAI provider
+npm install hyper-router ai @ai-sdk/amazon-bedrock
+
+# SQLite storage
+npm install hyper-router sql.js
+
+# Postgres storage
+npm install hyper-router pg
+```
+
+Core APIs, `InMemoryStorage`, and `JsonStorage` are exported from the root package. Provider adapters and heavier storage adapters are exported from subpaths.
+
+Minimal usage:
+
+```ts
+import {
+  createRuntime,
+  defineAgent,
+  InMemoryStorage,
+  StubProvider,
+} from "hyper-router";
+
+const agent = defineAgent({
+  name: "example-agent",
+  instructions: "You are helpful.",
+  model: "stub-model",
+});
+
+const runtime = createRuntime({
+  agent,
+  provider: new StubProvider(),
+  storage: new InMemoryStorage(),
+});
+
+const result = await runtime.run({
+  sessionId: "demo-session",
+  input: "Hello!",
+});
+
+console.log(result.status);
+console.log(result.messages.at(-1));
+```
+
+For local development in this repository:
 
 ```bash
 npm install
@@ -215,8 +273,8 @@ import {
   createRuntime,
   defineAgent,
   InMemoryStorage,
-  OpenRouterProvider,
 } from "hyper-router";
+import { OpenRouterProvider } from "hyper-router/providers/openrouter";
 
 const agent = defineAgent({
   name: "my-agent",
@@ -531,7 +589,7 @@ npm run demo:json-resume
 ### SQLite example
 
 ```ts
-import { SqliteStorage } from "hyper-router";
+import { SqliteStorage } from "hyper-router/storage/sqlite";
 
 const storage = new SqliteStorage({
   filePath: ".tmp/agent.sqlite",
@@ -547,7 +605,7 @@ npm run demo:sqlite-resume
 ### Postgres example
 
 ```ts
-import { PostgresStorage } from "hyper-router";
+import { PostgresStorage } from "hyper-router/storage/postgres";
 
 const storage = new PostgresStorage({
   connectionString: process.env.DATABASE_URL,
@@ -685,8 +743,8 @@ import {
   createRuntime,
   defineAgent,
   InMemoryStorage,
-  OpenAIVAIProvider,
 } from "hyper-router";
+import { OpenAIVAIProvider } from "hyper-router/providers/openai-vai";
 
 const agent = defineAgent({
   name: "my-openai-agent",
@@ -766,11 +824,11 @@ Usage:
 
 ```ts
 import {
-  AmazonBedrockVAIProvider,
   createRuntime,
   defineAgent,
   InMemoryStorage,
 } from "hyper-router";
+import { AmazonBedrockVAIProvider } from "hyper-router/providers/amazon-bedrock-vai";
 
 const agent = defineAgent({
   name: "my-bedrock-agent",

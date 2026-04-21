@@ -7,10 +7,10 @@ import {
   createRuntime,
   defineAgent,
   defineTool,
-  OpenRouterProvider,
-  SqliteStorage,
   type Message,
 } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
+import { SqliteStorage } from "../src/storage/sqlite.js";
 
 const sessionId = "openrouter-gpt54-mini-sqlite-demo";
 const storagePath = resolve("tmp/openrouter-gpt54-mini-demo-storage.sqlite");

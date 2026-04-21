@@ -5,8 +5,8 @@ import {
   defineAgent,
   defineTool,
   InMemoryStorage,
-  OpenRouterProvider,
 } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
 
 const echoTool = defineTool<{ text: string }, { echoed: string }>({
   name: "echo",

@@ -124,6 +124,58 @@ describe("AmazonBedrockVAIProvider", () => {
     expect(echoTool.inputSchema.safeParse({ text: "hello" }).success).toBe(true);
   });
 
+  it("accepts JSON Schema tool definitions", () => {
+    const provider = new AmazonBedrockVAIProvider({
+      provider: {} as any,
+      generateTextImpl: vi.fn() as any,
+    });
+
+    const tools = provider["toAiSdkTools"]([
+      {
+        name: "echo",
+        description: "Echo text",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+          },
+          required: ["text"],
+          additionalProperties: false,
+        },
+        execute: vi.fn(async () => ({ ok: true, output: { echoed: "hello" } })),
+      },
+    ]);
+
+    expect((tools.echo as any).inputSchema).toEqual({
+      type: "object",
+      properties: {
+        text: { type: "string" },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    });
+  });
+
+  it("rejects invalid tool schemas early", () => {
+    const provider = new AmazonBedrockVAIProvider({
+      provider: {} as any,
+      generateTextImpl: vi.fn() as any,
+    });
+
+    expect(() =>
+      provider["toAiSdkTools"]([
+        {
+          name: "echo",
+          description: "Echo text",
+          inputSchema: { nope: true },
+          execute: vi.fn(async () => ({ ok: true, output: { echoed: "hello" } })),
+        },
+      ]),
+    ).toThrowError(
+      "Invalid tool inputSchema: expected Zod schema, JSON Schema object, or undefined.",
+    );
+  });
+
   it("normalizes generateText output into ModelResponse", async () => {
     const generateTextImpl = vi.fn(async () => ({
       finishReason: "tool-calls",

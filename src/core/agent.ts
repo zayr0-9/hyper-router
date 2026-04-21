@@ -5,7 +5,7 @@ export interface AgentDefinition {
   name: string;
   instructions: string;
   model: string;
-  tools?: ToolDefinition<any, any>[];
+  tools?: ToolDefinition<unknown, unknown>[];
   buildMessages?: (input: string) => Promise<Message[]> | Message[];
 }
 

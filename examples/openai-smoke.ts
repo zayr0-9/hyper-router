@@ -1,4 +1,4 @@
-import { OpenAIVAIProvider } from "../src/index.js";
+import { OpenAIVAIProvider } from "../src/providers/openai-vai/index.js";
 import type { Message } from "../src/index.js";
 
 async function main(): Promise<void> {

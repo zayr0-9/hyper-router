@@ -312,22 +312,31 @@ describe("AgentRuntime ephemeral mode", () => {
   it("does not load prior transcript or persist transcript, run state, or metadata", async () => {
     const capturedRuns: Message[][] = [];
 
-    const provider: ModelProvider = {
-      generate: vi.fn(async ({ messages, ephemeral, previousSessionMetadata }): Promise<ModelResponse> => {
-        capturedRuns.push(messages.map((message) => ({ ...message })));
-        expect(ephemeral).toBe(true);
-        expect(previousSessionMetadata).toBeNull();
+    type GenerateInput = Parameters<ModelProvider["generate"]>[0];
 
-        return {
-          message: {
-            role: "assistant",
-            content: "ephemeral-ack",
-            date: new Date("2025-01-01T00:00:30.000Z"),
-          },
-          stopReason: "completed",
-        };
-      }),
+    const provider: ModelProvider = {
+      generate: vi.fn(
+        async ({
+          messages,
+          ephemeral,
+          previousSessionMetadata,
+        }: GenerateInput): Promise<ModelResponse> => {
+          capturedRuns.push(messages.map((message) => ({ ...message })));
+          expect(ephemeral).toBe(true);
+          expect(previousSessionMetadata).toBeNull();
+
+          return {
+            message: {
+              role: "assistant",
+              content: "ephemeral-ack",
+              date: new Date("2025-01-01T00:00:30.000Z"),
+            },
+            stopReason: "completed",
+          };
+        },
+      ),
     };
+
 
     const storage = new InMemoryStorage();
     await storage.saveMessages("ephemeral-session", [

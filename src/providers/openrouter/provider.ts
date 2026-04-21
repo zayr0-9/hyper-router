@@ -5,6 +5,7 @@ import {
 import { z } from "zod/v4";
 
 import type { ModelProvider } from "../../core/providers.js";
+import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
 import type { ToolDefinition } from "../../core/tool.js";
 import type { GeneratedImage, Message, ModelResponse, ToolCall } from "../../core/types.js";
@@ -78,7 +79,7 @@ export class OpenRouterProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<any, any>[];
+    tools: ToolDefinition<unknown, unknown>[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse> {
@@ -191,8 +192,16 @@ export class OpenRouterProvider implements ModelProvider {
   }
 
   protected toZodInputSchema(inputSchema: unknown) {
-    if (inputSchema && typeof inputSchema === "object") {
-      return inputSchema as z.ZodObject<any>;
+    const normalized = normalizeSchema(inputSchema);
+
+    if (normalized.kind === "zod") {
+      return normalized.schema as z.ZodObject<any>;
+    }
+
+    if (normalized.kind === "json-schema") {
+      throw new Error(
+        "OpenRouterProvider requires a Zod tool schema. JSON Schema was provided. Use z.object(...) for this provider.",
+      );
     }
 
     return z.object({}).passthrough();

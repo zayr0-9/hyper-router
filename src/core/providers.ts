@@ -7,7 +7,7 @@ export interface ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<any, any>[];
+    tools: ToolDefinition<unknown, unknown>[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse>;
@@ -18,7 +18,7 @@ export class StubProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<any, any>[];
+    tools: ToolDefinition<unknown, unknown>[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse> {

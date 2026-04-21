@@ -243,6 +243,35 @@ describe("OpenRouterProvider", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("rejects JSON Schema tool definitions with a clear error", () => {
+    const provider = new TestProvider({
+      client: createMockClient(),
+    });
+
+    expect(() =>
+      provider.exposeSchema({
+        type: "object",
+        properties: {
+          text: { type: "string" },
+        },
+        required: ["text"],
+        additionalProperties: false,
+      }),
+    ).toThrowError(
+      "OpenRouterProvider requires a Zod tool schema. JSON Schema was provided. Use z.object(...) for this provider.",
+    );
+  });
+
+  it("rejects invalid tool schemas early", () => {
+    const provider = new TestProvider({
+      client: createMockClient(),
+    });
+
+    expect(() => provider.exposeSchema({ nope: true })).toThrowError(
+      "Invalid tool inputSchema: expected Zod schema, JSON Schema object, or undefined.",
+    );
+  });
+
 
   it("normalizes text and tool calls into ModelResponse", async () => {
     const getText = vi.fn(async () => "Tool requested.");

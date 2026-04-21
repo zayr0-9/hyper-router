@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 
-import { OpenAIVAIProvider, defineTool } from "../src/index.js";
+import { defineTool } from "../src/index.js";
+import { OpenAIVAIProvider } from "../src/providers/openai-vai/index.js";
 import type { Message } from "../src/index.js";
 
 async function main(): Promise<void> {

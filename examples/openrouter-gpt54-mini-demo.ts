@@ -8,9 +8,9 @@ import {
   defineAgent,
   defineTool,
   JsonStorage,
-  OpenRouterProvider,
   type Message,
 } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
 
 const sessionId = "openrouter-gpt54-mini-demo";
 const storagePath = resolve("tmp/openrouter-gpt54-mini-demo-storage.json");

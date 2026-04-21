@@ -2,6 +2,7 @@ import { generateText, tool, type FlexibleSchema, type ModelMessage } from "ai";
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 
 import type { ModelProvider } from "../../core/providers.js";
+import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
 import type { ToolDefinition } from "../../core/tool.js";
 import type { Message, ModelResponse, ToolCall } from "../../core/types.js";
@@ -40,7 +41,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
     sessionId?: string;
     model: string;
     messages: Message[];
-    tools: ToolDefinition<any, any>[];
+    tools: ToolDefinition<unknown, unknown>[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
   }): Promise<ModelResponse> {
@@ -88,7 +89,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
     return response;
   }
 
-  protected toAiSdkTools(tools: ToolDefinition<any, any>[]): Record<string, unknown> {
+  protected toAiSdkTools(tools: ToolDefinition<unknown, unknown>[]): Record<string, unknown> {
     return Object.fromEntries(
       tools.map((toolDefinition) => [
         toolDefinition.name,
@@ -101,9 +102,21 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
   }
 
   protected toToolSchema(schema: unknown): FlexibleSchema<Record<string, unknown>> {
-    return (schema ?? { type: "object", properties: {}, additionalProperties: true }) as FlexibleSchema<
-      Record<string, unknown>
-    >;
+    const normalized = normalizeSchema(schema);
+
+    if (normalized.kind === "zod") {
+      return normalized.schema as FlexibleSchema<Record<string, unknown>>;
+    }
+
+    if (normalized.kind === "json-schema") {
+      return normalized.schema as FlexibleSchema<Record<string, unknown>>;
+    }
+
+    return {
+      type: "object",
+      properties: {},
+      additionalProperties: true,
+    } as FlexibleSchema<Record<string, unknown>>;
   }
 
   protected toModelMessages(messages: Message[]): ModelMessage[] {

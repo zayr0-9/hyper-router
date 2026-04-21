@@ -1,4 +1,4 @@
-import { OpenRouterProvider } from "../src/index.js";
+import { OpenRouterProvider } from "../src/providers/openrouter/index.js";
 import type { Message } from "../src/index.js";
 
 async function main(): Promise<void> {

@@ -1,11 +1,19 @@
-import { generateText, tool, type FlexibleSchema, type ModelMessage } from "ai";
+import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 
 import type { ModelProvider } from "../../core/providers.js";
-import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
 import type { AnyToolDefinition } from "../../core/tool.js";
-import type { Message, ModelResponse, ToolCall } from "../../core/types.js";
+import type { Message, ModelResponse, ReasoningOptions } from "../../core/types.js";
+import {
+  findLastAssistantMessage,
+  normalizeFinishReason,
+  normalizeVercelToolCalls,
+  readAssistantContent,
+  readAssistantReasoningContent,
+  toAiSdkTools,
+  toModelMessages,
+} from "../vercel-ai/shared.js";
 import type {
   OpenAIVAIApiMode,
   OpenAIVAIProviderOptions,
@@ -17,6 +25,7 @@ export class OpenAIVAIProvider implements ModelProvider {
   private readonly apiMode: OpenAIVAIApiMode;
   private readonly maxRetries: number | undefined;
   private readonly defaultProviderOptions: OpenAIVAIProviderSpecificOptions | undefined;
+  private readonly reasoning: ReasoningOptions | undefined;
   private readonly generateTextImpl: typeof generateText;
 
   constructor(options: OpenAIVAIProviderOptions = {}) {
@@ -35,6 +44,7 @@ export class OpenAIVAIProvider implements ModelProvider {
     this.apiMode = options.api ?? "auto";
     this.maxRetries = options.maxRetries;
     this.defaultProviderOptions = options.providerOptions;
+    this.reasoning = options.reasoning;
     this.generateTextImpl = options.generateTextImpl ?? generateText;
   }
 
@@ -47,14 +57,15 @@ export class OpenAIVAIProvider implements ModelProvider {
     ephemeral?: boolean;
   }): Promise<ModelResponse> {
     const tools = this.toAiSdkTools(input.tools);
+    const providerOptions = this.buildProviderOptions();
     const result = await this.generateTextImpl({
       model: this.getModel(input.model),
-      messages: this.toModelMessages(input.messages),
-      tools: tools as any,
-      ...(this.defaultProviderOptions
+      messages: this.toModelMessages(input.messages, { includeReasoning: this.shouldIncludeReasoningInMessages() }),
+      ...(input.tools.length > 0 ? { tools: tools as any } : {}),
+      ...(providerOptions
         ? {
             providerOptions: {
-              openai: this.defaultProviderOptions,
+              openai: providerOptions as any,
             },
           }
         : {}),
@@ -64,10 +75,15 @@ export class OpenAIVAIProvider implements ModelProvider {
     const responseMessages = result.response.messages;
     const assistantMessage = this.findLastAssistantMessage(responseMessages);
     const normalizedToolCalls = this.normalizeToolCalls(await result.toolCalls);
+    const reasoningContent = this.shouldCaptureReasoning()
+      ? this.readAssistantReasoningContent(assistantMessage, result)
+      : undefined;
+    const providerStopReason = result.finishReason;
 
     const response: ModelResponse = {
       toolCalls: normalizedToolCalls,
-      stopReason: this.normalizeFinishReason(result.finishReason),
+      stopReason: this.normalizeFinishReason(providerStopReason),
+      ...(providerStopReason ? { providerStopReason } : {}),
     };
 
     if (assistantMessage) {
@@ -76,6 +92,7 @@ export class OpenAIVAIProvider implements ModelProvider {
         role: "assistant",
         content: assistantContent,
         date: new Date(),
+        ...(reasoningContent ? { reasoningContent } : {}),
         ...(normalizedToolCalls.length > 0 ? { toolCalls: normalizedToolCalls } : {}),
       };
     } else if (normalizedToolCalls.length > 0) {
@@ -90,160 +107,72 @@ export class OpenAIVAIProvider implements ModelProvider {
     return response;
   }
 
-  protected toAiSdkTools(tools: AnyToolDefinition[]): Record<string, unknown> {
-    return Object.fromEntries(
-      tools.map((toolDefinition) => [
-        toolDefinition.name,
-        tool({
-          description: toolDefinition.description,
-          inputSchema: this.toToolSchema(toolDefinition.inputSchema),
-        }),
-      ]),
-    );
-  }
+  protected toAiSdkTools = toAiSdkTools;
+  protected toModelMessages = toModelMessages;
+  protected normalizeToolCalls = normalizeVercelToolCalls;
+  protected findLastAssistantMessage = findLastAssistantMessage;
+  protected readAssistantContent = readAssistantContent;
+  protected normalizeFinishReason = normalizeFinishReason;
 
-  protected toToolSchema(schema: unknown): FlexibleSchema<Record<string, unknown>> {
-    const normalized = normalizeSchema(schema);
-
-    if (normalized.kind === "zod") {
-      return normalized.schema as FlexibleSchema<Record<string, unknown>>;
-    }
-
-    if (normalized.kind === "json-schema") {
-      return normalized.schema as FlexibleSchema<Record<string, unknown>>;
-    }
-
-    return {
-      type: "object",
-      properties: {},
-      additionalProperties: true,
-    } as unknown as FlexibleSchema<Record<string, unknown>>;
-  }
-
-  protected toModelMessages(messages: Message[]): ModelMessage[] {
-    return messages.map((message): ModelMessage => {
-      if (message.role === "tool") {
-        return {
-          role: "tool" as const,
-          content: [
-            {
-              type: "tool-result" as const,
-              toolCallId: message.toolCallId ?? `${message.name ?? "tool"}-result`,
-              toolName: message.name ?? "tool",
-              output: this.toToolResultOutput(message.content),
-            },
-          ],
-        };
-      }
-
-      if (message.role === "assistant") {
-        const contentParts: Array<
-          | { type: "text"; text: string }
-          | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-        > = [];
-
-        if (message.content.length > 0) {
-          contentParts.push({
-            type: "text",
-            text: message.content,
-          });
-        }
-
-        for (const toolCall of message.toolCalls ?? []) {
-          contentParts.push({
-            type: "tool-call",
-            toolCallId: toolCall.id ?? `${toolCall.toolName}-call`,
-            toolName: toolCall.toolName,
-            input: toolCall.args ?? {},
-          });
-        }
-
-        return {
-          role: "assistant" as const,
-          content: contentParts.length === 1 && contentParts[0]?.type === "text"
-            ? contentParts[0].text
-            : contentParts,
-        };
-      }
-
-      return {
-        role: message.role,
-        content: message.content,
-      };
+  protected readAssistantReasoningContent(
+    message: { content: unknown; providerMetadata?: unknown } | undefined,
+    result?: unknown,
+  ): string | undefined {
+    return readAssistantReasoningContent({
+      message,
+      result,
+      providerMetadataKey: "openai",
+      extraCandidates: (candidateResult) => {
+        const resultRecord = candidateResult as any;
+        return [
+          resultRecord?.response?.body?.choices?.[0]?.message?.reasoning_content,
+          resultRecord?.steps?.at?.(-1)?.response?.body?.choices?.[0]?.message?.reasoning_content,
+        ];
+      },
     });
   }
 
-  protected toToolResultOutput(content: string): { type: "text"; value: string } | { type: "json"; value: any } {
-    try {
-      const parsed = JSON.parse(content) as unknown;
-      if (Array.isArray(parsed)) {
-        return {
-          type: "json",
-          value: parsed,
-        };
-      }
+  private buildProviderOptions(): OpenAIVAIProviderSpecificOptions | undefined {
+    if (!this.reasoning && !this.defaultProviderOptions) {
+      return undefined;
+    }
 
-      if (this.isRecord(parsed)) {
-        return {
-          type: "json",
-          value: parsed,
-        };
-      }
+    return this.mergeProviderOptions(this.defaultProviderOptions);
+  }
 
+  private mergeProviderOptions(
+    providerOptions: OpenAIVAIProviderSpecificOptions | undefined,
+  ): OpenAIVAIProviderSpecificOptions {
+    if (this.reasoning === false) {
       return {
-        type: "text",
-        value: content,
-      };
-    } catch {
-      return {
-        type: "text",
-        value: content,
-      };
-    }
-  }
-
-  protected normalizeToolCalls(
-    toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown }>,
-  ): ToolCall[] {
-    return toolCalls.map((toolCall) => ({
-      id: toolCall.toolCallId,
-      toolName: toolCall.toolName,
-      args: toolCall.input,
-    }));
-  }
-
-  protected findLastAssistantMessage(
-    messages: Array<{ role: string; content: unknown }>,
-  ) {
-    return [...messages].reverse().find((message) => message.role === "assistant");
-  }
-
-  protected readAssistantContent(
-    message: { content: unknown },
-  ): string {
-    if (typeof message.content === "string") {
-      return message.content;
+        ...(providerOptions as Record<string, unknown> | undefined),
+        reasoningEffort: "none",
+      } as OpenAIVAIProviderSpecificOptions;
     }
 
-    if (!Array.isArray(message.content)) {
-      return "";
+    if (!this.reasoning) {
+      return (providerOptions ?? {}) as OpenAIVAIProviderSpecificOptions;
     }
 
-    return message.content
-      .filter(
-        (part): part is { type: "text"; text: string } =>
-          this.isRecord(part) && part.type === "text" && typeof part.text === "string",
-      )
-      .map((part) => part.text)
-      .join("");
+    const reasoningPatch: Record<string, unknown> = {};
+    if (this.reasoning.enabled === false) {
+      reasoningPatch.reasoningEffort = "none";
+    } else if (this.reasoning.effort) {
+      reasoningPatch.reasoningEffort = this.reasoning.effort;
+    }
+
+    return {
+      ...(providerOptions as Record<string, unknown> | undefined),
+      ...reasoningPatch,
+    } as OpenAIVAIProviderSpecificOptions;
   }
 
-  protected normalizeFinishReason(finishReason: string): string {
-    return finishReason === "tool-calls" ? "tool_calls" : finishReason;
+  private shouldCaptureReasoning(): boolean {
+    return this.reasoning === false ? false : this.reasoning?.capture ?? true;
   }
 
-  protected isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
+  private shouldIncludeReasoningInMessages(): boolean {
+    return this.reasoning === false ? false : this.reasoning?.includeInMessages ?? true;
   }
 
   private getModel(model: string) {

@@ -210,6 +210,7 @@ dist/
 - `ModelProvider` is the provider interface
 - `StorageAdapter` is the current storage interface
 - the canonical transcript is the durable conversation record
+- provider reasoning/thinking output, when available, is stored on assistant messages as `message.reasoningContent`
 
 ## Basic example
 
@@ -724,6 +725,41 @@ This package layout is npm-friendly because:
 - examples are kept separate from published source
 - build output is isolated in `dist/`
 - `prepublishOnly` validates the package before publish
+
+## Reasoning content
+
+Some providers/models can return reasoning or thinking content. When available, `hyper-router` stores it on assistant messages:
+
+```ts
+const result = await runtime.run({
+  sessionId: "demo-session",
+  input: "Solve this carefully.",
+});
+
+const assistant = result.messages.at(-1);
+console.log(assistant?.content);
+console.log(assistant?.reasoningContent);
+```
+
+Reasoning is optional, provider-dependent, and persists in storage with the rest of the transcript.
+
+## GLM / Z.AI provider
+
+```ts
+import { GLMProvider } from "hyper-router/providers/glm";
+
+const provider = new GLMProvider({
+  thinking: { type: "enabled" },
+});
+```
+
+The provider defaults to `https://api.z.ai/api/paas/v4/` and OpenAI-compatible chat mode. Set `ZAI_API_KEY`, pass `apiKey`, or override `baseURL`/`endpoint`.
+
+When Z.AI returns `reasoning_content`, it is exposed as:
+
+```ts
+message.reasoningContent
+```
 
 ## OpenAI VAI provider
 

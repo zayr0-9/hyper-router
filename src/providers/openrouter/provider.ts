@@ -8,7 +8,7 @@ import type { ModelProvider } from "../../core/providers.js";
 import { normalizeSchema } from "../../core/schema.js";
 import type { SessionMetadata } from "../../core/storage.js";
 import type { AnyToolDefinition } from "../../core/tool.js";
-import type { GeneratedImage, Message, ModelResponse, ToolCall } from "../../core/types.js";
+import type { GeneratedImage, Message, ModelResponse, ReasoningOptions, StopReason, ToolCall } from "../../core/types.js";
 import { toInputItems } from "./items.js";
 import {
   createStateAccessor,
@@ -50,6 +50,8 @@ export class OpenRouterProvider implements ModelProvider {
   private readonly continuationStrategy: OpenRouterContinuationStrategy;
   private readonly stateStore: OpenRouterStateStore | undefined;
   private readonly invalidateOnModelChange: boolean;
+  private readonly reasoning: ReasoningOptions | undefined;
+  private readonly callOptions: Record<string, unknown> | undefined;
   private readonly sessionProgress = new Map<string, SessionProgressRecord>();
 
   constructor(options: OpenRouterProviderOptions = {}) {
@@ -59,6 +61,8 @@ export class OpenRouterProvider implements ModelProvider {
         ? undefined
         : (options.continuation?.stateStore ?? new InMemoryOpenRouterStateStore());
     this.invalidateOnModelChange = options.continuation?.invalidateOnModelChange ?? true;
+    this.reasoning = options.reasoning;
+    this.callOptions = options.callOptions;
 
     if (options.client) {
       this.client = options.client;
@@ -134,11 +138,12 @@ export class OpenRouterProvider implements ModelProvider {
       useState && hasExistingState
         ? []
         : this.continuationStrategy === "state"
-          ? toInputItems(externalMessages)
-          : toInputItems(input.messages);
+          ? toInputItems(externalMessages, { includeReasoning: this.shouldIncludeReasoningInMessages() })
+          : toInputItems(input.messages, { includeReasoning: this.shouldIncludeReasoningInMessages() });
 
     const callResult = useState && sessionId
       ? this.client.callModel({
+          ...this.buildCallOptions(),
           model: input.model,
           input: requestInput,
           tools: toolDefs,
@@ -149,6 +154,7 @@ export class OpenRouterProvider implements ModelProvider {
           }),
         })
       : this.client.callModel({
+          ...this.buildCallOptions(),
           model: input.model,
           input: requestInput,
           tools: toolDefs,
@@ -161,6 +167,10 @@ export class OpenRouterProvider implements ModelProvider {
     ]);
     const normalizedToolCalls = this.normalizeToolCalls(toolCalls as OpenRouterToolCallLike[]);
     const generatedImages = this.extractGeneratedImages(fullResponse as { output?: Array<{ type?: unknown; result?: unknown }> });
+    const reasoningContent = this.shouldCaptureReasoning()
+      ? this.extractReasoningContent(fullResponse)
+      : undefined;
+    const providerStopReason = this.extractProviderStopReason(fullResponse);
 
     if (useState && sessionId) {
       this.getSessionProgress(sessionId).syncedExternalMessageCount = externalMessages.length;
@@ -168,7 +178,8 @@ export class OpenRouterProvider implements ModelProvider {
 
     const response: ModelResponse = {
       toolCalls: normalizedToolCalls,
-      stopReason: normalizedToolCalls.length > 0 ? "tool_calls" : "completed",
+      stopReason: normalizedToolCalls.length > 0 ? "tool_calls" : this.normalizeFinishReason(providerStopReason),
+      ...(providerStopReason ? { providerStopReason } : {}),
       ...(generatedImages.length > 0 ? { generatedImages } : {}),
     };
 
@@ -177,6 +188,7 @@ export class OpenRouterProvider implements ModelProvider {
         role: "assistant",
         content: text,
         date: new Date(),
+        ...(reasoningContent ? { reasoningContent } : {}),
         ...(normalizedToolCalls.length > 0 ? { toolCalls: normalizedToolCalls } : {}),
       };
     } else if (normalizedToolCalls.length > 0) {
@@ -184,6 +196,7 @@ export class OpenRouterProvider implements ModelProvider {
         role: "assistant",
         content: "",
         date: new Date(),
+        ...(reasoningContent ? { reasoningContent } : {}),
         toolCalls: normalizedToolCalls,
       };
     }
@@ -215,6 +228,82 @@ export class OpenRouterProvider implements ModelProvider {
     }));
   }
 
+  protected extractReasoningContent(response: unknown): string | undefined {
+    const candidates: unknown[] = [];
+    const output = (response as any)?.output;
+
+    if (Array.isArray(output)) {
+      for (const item of output) {
+        candidates.push(item.reasoning, item.reasoning_content, item.reasoningContent);
+
+        if (item.type === "reasoning") {
+          candidates.push(item.text, item.content);
+        }
+
+        if (Array.isArray(item.content)) {
+          for (const part of item.content) {
+            candidates.push(part.reasoning, part.reasoning_content, part.reasoningContent);
+
+            if (part.type === "reasoning") {
+              candidates.push(part.text, part.content);
+            }
+          }
+        }
+      }
+    }
+
+    candidates.push(
+      (response as any)?.reasoning,
+      (response as any)?.reasoning_content,
+      (response as any)?.reasoningContent,
+    );
+
+    return candidates
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join("\n\n") || undefined;
+  }
+
+  protected extractProviderStopReason(response: unknown): string | undefined {
+    const record = response as any;
+    const candidates = [
+      record?.finish_reason,
+      record?.finishReason,
+      record?.stop_reason,
+      record?.stopReason,
+      record?.status,
+    ];
+
+    return candidates.find(
+      (value): value is string => typeof value === "string" && value.trim().length > 0,
+    );
+  }
+
+  protected normalizeFinishReason(finishReason: string | undefined): StopReason {
+    switch (finishReason) {
+      case undefined:
+      case "completed":
+      case "complete":
+      case "stop":
+        return "stop";
+      case "tool-calls":
+      case "tool_calls":
+        return "tool_calls";
+      case "length":
+      case "max_tokens":
+        return "length";
+      case "content-filter":
+      case "content_filter":
+        return "content_filter";
+      case "refusal":
+        return "refusal";
+      case "error":
+      case "provider_error":
+        return "provider_error";
+      default:
+        return "unknown";
+    }
+  }
+
   protected extractGeneratedImages(response: {
     output?: Array<{ type?: unknown; result?: unknown }>;
   }): GeneratedImage[] {
@@ -234,6 +323,33 @@ export class OpenRouterProvider implements ModelProvider {
           url: result,
         } satisfies GeneratedImage;
       });
+  }
+
+  private buildCallOptions(): Record<string, unknown> {
+    const options = { ...(this.callOptions ?? {}) };
+
+    if (this.reasoning === false) {
+      return { ...options, reasoning: { enabled: false } };
+    }
+
+    if (this.reasoning) {
+      options.reasoning = {
+        ...(typeof options.reasoning === "object" && options.reasoning !== null ? options.reasoning : {}),
+        ...(this.reasoning.enabled !== undefined ? { enabled: this.reasoning.enabled } : {}),
+        ...(this.reasoning.effort ? { effort: this.reasoning.effort } : {}),
+        ...(this.reasoning.budgetTokens !== undefined ? { budgetTokens: this.reasoning.budgetTokens } : {}),
+      };
+    }
+
+    return options;
+  }
+
+  private shouldCaptureReasoning(): boolean {
+    return this.reasoning === false ? false : this.reasoning?.capture ?? true;
+  }
+
+  private shouldIncludeReasoningInMessages(): boolean {
+    return this.reasoning === false ? false : this.reasoning?.includeInMessages ?? true;
   }
 
   private toStateMetadata(

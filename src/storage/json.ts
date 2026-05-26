@@ -11,6 +11,7 @@ interface JsonStorageOptions {
 interface SerializedMessage {
   role: Message["role"];
   content: string;
+  reasoningContent?: string;
   name?: string;
   date: string;
   toolCallId?: string;
@@ -84,6 +85,7 @@ export class JsonStorage implements StorageAdapter {
       role: message.role,
       content: message.content,
       date: message.date.toISOString(),
+      ...(message.reasoningContent ? { reasoningContent: message.reasoningContent } : {}),
       ...(message.name ? { name: message.name } : {}),
       ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
       ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
@@ -95,6 +97,7 @@ export class JsonStorage implements StorageAdapter {
       role: message.role,
       content: message.content,
       date: new Date(message.date),
+      ...(message.reasoningContent ? { reasoningContent: message.reasoningContent } : {}),
       ...(message.name ? { name: message.name } : {}),
       ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
       ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),

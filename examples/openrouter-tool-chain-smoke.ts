@@ -238,7 +238,7 @@ class TranscriptOnlyTraceOpenRouterProvider implements ModelProvider {
 
     const result: ModelResponse = {
       toolCalls: normalizedToolCalls,
-      stopReason: normalizedToolCalls.length > 0 ? "tool_calls" : "completed",
+      stopReason: normalizedToolCalls.length > 0 ? "tool_calls" : "stop",
     };
 
     if (text && text.trim().length > 0) {

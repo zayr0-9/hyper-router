@@ -41,6 +41,7 @@ function createMessages(): Message[] {
     {
       role: "assistant",
       content: "I will call a tool.",
+      reasoningContent: "I need to call the tool first.",
       date: new Date("2025-01-01T00:00:02.000Z"),
       toolCalls: [
         {
@@ -83,6 +84,7 @@ describe("SqliteStorage", () => {
       {
         role: "assistant",
         content: "I will call a tool.",
+        reasoningContent: "I need to call the tool first.",
         date: new Date("2025-01-01T00:00:02.000Z"),
         toolCalls: [
           {

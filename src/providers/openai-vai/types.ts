@@ -1,4 +1,5 @@
 import type { generateText } from "ai";
+import type { ReasoningOptions } from "../../core/types.js";
 import type {
   OpenAIChatLanguageModelOptions,
   OpenAIEmbeddingModelOptions,
@@ -29,6 +30,7 @@ export interface OpenAIVAIProviderOptions
   api?: OpenAIVAIApiMode;
   maxRetries?: number;
   providerOptions?: OpenAIVAIProviderSpecificOptions;
+  reasoning?: ReasoningOptions;
   generateTextImpl?: typeof generateText;
 }
 

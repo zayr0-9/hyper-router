@@ -28,7 +28,7 @@ describe("AgentRuntime storage", () => {
             content: "ack",
             date: new Date("2025-01-01T00:00:10.000Z"),
           },
-          stopReason: "completed",
+          stopReason: "stop",
         };
       }),
     };
@@ -87,6 +87,116 @@ describe("AgentRuntime storage", () => {
     ]);
   });
 
+  it("surfaces normalized and provider stop reasons in runtime result", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "partial answer",
+          date: new Date("2025-01-01T00:00:12.000Z"),
+        },
+        toolCalls: [],
+        stopReason: "length",
+        providerStopReason: "max_tokens",
+      })),
+    };
+
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "stop-reason-agent",
+        instructions: "Be helpful.",
+        model: "stub-model",
+      }),
+      provider,
+      storage: new InMemoryStorage(),
+    });
+
+    const result = await runtime.run({
+      sessionId: "stop-reason-session",
+      input: "Write a long answer.",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.stopReason).toBe("length");
+    expect(result.providerStopReason).toBe("max_tokens");
+  });
+
+  it("returns generated images from provider responses", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "Generated an image.",
+          date: new Date("2025-01-01T00:00:15.000Z"),
+        },
+        generatedImages: [
+          {
+            dataUrl: "data:image/png;base64,abc123",
+            mimeType: "image/png",
+          },
+        ],
+        stopReason: "stop",
+      })),
+    };
+
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "image-agent",
+        instructions: "Generate images.",
+        model: "stub-model",
+      }),
+      provider,
+      storage: new InMemoryStorage(),
+    });
+
+    const result = await runtime.run({
+      sessionId: "image-session",
+      input: "Draw a red square.",
+    });
+
+    expect(result.generatedImages).toEqual([
+      {
+        dataUrl: "data:image/png;base64,abc123",
+        mimeType: "image/png",
+      },
+    ]);
+  });
+
+  it("preserves provider reasoning content in runtime result and persisted transcript", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "done",
+          reasoningContent: "I reasoned about it.",
+          date: new Date("2025-01-01T00:00:18.000Z"),
+        },
+        stopReason: "stop",
+      })),
+    };
+
+    const storage = new InMemoryStorage();
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "reasoning-agent",
+        instructions: "Think carefully.",
+        model: "stub-model",
+      }),
+      provider,
+      storage,
+    });
+
+    const result = await runtime.run({
+      sessionId: "reasoning-session",
+      input: "Solve it.",
+    });
+
+    expect(result.messages.at(-1)?.reasoningContent).toBe("I reasoned about it.");
+    expect((await storage.loadMessages("reasoning-session")).at(-1)?.reasoningContent).toBe(
+      "I reasoned about it.",
+    );
+  });
+
   it("updates standard session metadata and preserves custom metadata", async () => {
     const provider: ModelProvider = {
       generate: vi.fn(async (): Promise<ModelResponse> => ({
@@ -95,7 +205,7 @@ describe("AgentRuntime storage", () => {
           content: "done",
           date: new Date("2025-01-01T00:00:20.000Z"),
         },
-        stopReason: "completed",
+        stopReason: "stop",
       })),
     };
 
@@ -236,7 +346,7 @@ it("can resume a paused tool chain from persisted transcript with a fresh runtim
               `owner=${parsedLookupResult.output?.owner}.`,
             date: new Date("2025-01-01T00:00:30.000Z"),
           },
-          stopReason: "completed",
+          stopReason: "stop",
         };
       }),
     };
@@ -307,6 +417,117 @@ it("can resume a paused tool chain from persisted transcript with a fresh runtim
   ]);
 });
 
+it("canonicalizes missing tool call IDs so resumed transcripts keep matching call/result IDs", async () => {
+  const echoTool = defineTool<{ text: string }, { echoed: string }>({
+    name: "echo",
+    description: "Echo text.",
+    async execute(args) {
+      return {
+        ok: true,
+        output: {
+          echoed: args.text,
+        },
+      };
+    },
+  });
+
+  const storage = new InMemoryStorage();
+  const capturedSecondRunMessages: Message[][] = [];
+
+  function createProvider(): ModelProvider {
+    return {
+      generate: vi.fn(async ({ messages }): Promise<ModelResponse> => {
+        const hasToolResult = messages.some((message: Message) => message.role === "tool");
+
+        if (!hasToolResult) {
+          const toolCalls: ToolCall[] = [
+            {
+              toolName: "echo",
+              args: { text: "hello" },
+            },
+          ];
+
+          return {
+            message: {
+              role: "assistant",
+              content: "I will echo that.",
+              date: new Date("2025-01-01T00:00:10.000Z"),
+              toolCalls,
+            },
+            toolCalls,
+            stopReason: "tool_calls",
+          };
+        }
+
+        capturedSecondRunMessages.push(messages.map((message: Message) => ({ ...message })));
+
+        return {
+          message: {
+            role: "assistant",
+            content: "Done.",
+            date: new Date("2025-01-01T00:00:20.000Z"),
+          },
+          stopReason: "stop",
+        };
+      }),
+    };
+  }
+
+  const agent = defineAgent({
+    name: "canonical-tool-id-agent",
+    instructions: "Use tools.",
+    model: "stub-model",
+    tools: [echoTool],
+    buildMessages: (input) =>
+      input.trim().length === 0 ? [] : [{ role: "user", content: input, date: new Date() }],
+  });
+
+  const firstRun = await createRuntime({
+    agent,
+    provider: createProvider(),
+    storage,
+  }).run({
+    sessionId: "canonical-tool-id-session",
+    input: "Echo hello.",
+    maxSteps: 1,
+  });
+
+  expect(firstRun.status).toBe("max_steps_reached");
+
+  const persistedAfterFirstRun = await storage.loadMessages("canonical-tool-id-session");
+  const assistantMessage = persistedAfterFirstRun.find((message) => message.role === "assistant");
+  const toolMessage = persistedAfterFirstRun.find((message) => message.role === "tool");
+
+  expect(assistantMessage?.toolCalls).toEqual([
+    {
+      id: "echo-1-0",
+      toolName: "echo",
+      args: { text: "hello" },
+    },
+  ]);
+  expect(toolMessage?.toolCallId).toBe("echo-1-0");
+
+  await createRuntime({
+    agent,
+    provider: createProvider(),
+    storage,
+  }).run({
+    sessionId: "canonical-tool-id-session",
+    input: "",
+  });
+
+  expect(capturedSecondRunMessages).toHaveLength(1);
+  const resumedAssistantMessage = capturedSecondRunMessages[0]?.find(
+    (message: Message) => message.role === "assistant",
+  );
+  const resumedToolMessage = capturedSecondRunMessages[0]?.find(
+    (message: Message) => message.role === "tool",
+  );
+
+  expect(resumedAssistantMessage?.toolCalls?.[0]?.id).toBe("echo-1-0");
+  expect(resumedToolMessage?.toolCallId).toBe("echo-1-0");
+});
+
 
 describe("AgentRuntime ephemeral mode", () => {
   it("does not load prior transcript or persist transcript, run state, or metadata", async () => {
@@ -331,7 +552,7 @@ describe("AgentRuntime ephemeral mode", () => {
               content: "ephemeral-ack",
               date: new Date("2025-01-01T00:00:30.000Z"),
             },
-            stopReason: "completed",
+            stopReason: "stop",
           };
         },
       ),
@@ -390,5 +611,123 @@ describe("AgentRuntime ephemeral mode", () => {
       model: "existing-model",
       promptHash: "existing-prompt-hash",
     });
+  });
+});
+
+describe("AgentRuntime failure handling", () => {
+  it("persists failed run state and partial transcript when the provider throws", async () => {
+    const storage = new InMemoryStorage();
+    const savedRuns: Array<{ sessionId: string; status: string }> = [];
+    const originalSaveRun = storage.saveRun.bind(storage);
+    storage.saveRun = vi.fn(async (record) => {
+      savedRuns.push(record);
+      await originalSaveRun(record);
+    });
+
+    const providerError = new Error("provider unavailable");
+    const provider: ModelProvider = {
+      generate: vi.fn(async () => {
+        throw providerError;
+      }),
+    };
+
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "failing-provider-agent",
+        instructions: "Persist failed provider runs.",
+        model: "stub-model",
+      }),
+      provider,
+      storage,
+    });
+
+    await expect(
+      runtime.run({
+        sessionId: "provider-failure-session",
+        input: "Hello before failure",
+      }),
+    ).rejects.toThrow(providerError);
+
+    expect(savedRuns).toEqual([
+      {
+        sessionId: "provider-failure-session",
+        status: "failed",
+      },
+    ]);
+    expect(simplifyMessages(await storage.loadMessages("provider-failure-session"))).toEqual([
+      { role: "user", content: "Hello before failure" },
+    ]);
+  });
+
+  it("converts thrown tool errors to failed tool results and allows the model to recover", async () => {
+    const explodingTool = defineTool({
+      name: "explode",
+      description: "Throws during execution.",
+      async execute() {
+        throw new Error("boom");
+      },
+    });
+
+    const provider: ModelProvider = {
+      generate: vi.fn(async ({ messages }): Promise<ModelResponse> => {
+        const toolResult = messages.find((message: Message) => message.role === "tool");
+
+        if (!toolResult) {
+          const toolCalls: ToolCall[] = [
+            {
+              id: "call_explode",
+              toolName: "explode",
+              args: {},
+            },
+          ];
+
+          return {
+            message: {
+              role: "assistant",
+              content: "I will call the tool.",
+              date: new Date("2025-01-01T00:00:10.000Z"),
+              toolCalls,
+            },
+            toolCalls,
+            stopReason: "tool_calls",
+          };
+        }
+
+        return {
+          message: {
+            role: "assistant",
+            content: `Recovered from ${JSON.parse(toolResult.content).error}.`,
+            date: new Date("2025-01-01T00:00:20.000Z"),
+          },
+          stopReason: "stop",
+        };
+      }),
+    };
+
+    const storage = new InMemoryStorage();
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "tool-error-agent",
+        instructions: "Recover from tool errors.",
+        model: "stub-model",
+        tools: [explodingTool],
+      }),
+      provider,
+      storage,
+    });
+
+    const result = await runtime.run({
+      sessionId: "tool-error-session",
+      input: "Trigger tool error",
+      maxSteps: 3,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(simplifyMessages(await storage.loadMessages("tool-error-session"))).toEqual([
+      { role: "user", content: "Trigger tool error" },
+      { role: "assistant", content: "I will call the tool." },
+      { role: "tool", content: JSON.stringify({ ok: false, error: "boom" }) },
+      { role: "assistant", content: "Recovered from boom." },
+    ]);
   });
 });

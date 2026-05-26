@@ -3,6 +3,7 @@ export type Role = "system" | "user" | "assistant" | "tool";
 export interface Message {
   role: Role;
   content: string;
+  reasoningContent?: string;
   name?: string;
   date: Date;
   toolCallId?: string;
@@ -36,11 +37,13 @@ export type PauseReason =
   | "waiting_for_tool";
 
 export type StopReason =
-  | "completed"
-  | "max_steps_reached"
+  | "stop"
+  | "tool_calls"
+  | "length"
+  | "content_filter"
+  | "refusal"
   | "provider_error"
-  | "tool_failed"
-  | "permission_denied";
+  | "unknown";
 
 export type ToolCallStatus =
   | "pending"
@@ -48,6 +51,20 @@ export type ToolCallStatus =
   | "completed"
   | "failed"
   | "cancelled";
+
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export type ReasoningOptions =
+  | false
+  | {
+      enabled?: boolean;
+      effort?: ReasoningEffort;
+      budgetTokens?: number;
+      /** Whether to extract returned reasoning into assistant messages. Defaults to true. */
+      capture?: boolean;
+      /** Whether to send prior assistant reasoning back to providers. Defaults to true. */
+      includeInMessages?: boolean;
+    };
   
 export interface ToolCall {
   id?: string;
@@ -64,7 +81,8 @@ export interface GeneratedImage {
 export interface ModelResponse {
   message?: Message;
   toolCalls?: ToolCall[];
-  stopReason?: string;
+  stopReason?: StopReason;
+  providerStopReason?: string;
   generatedImages?: GeneratedImage[];
 }
 

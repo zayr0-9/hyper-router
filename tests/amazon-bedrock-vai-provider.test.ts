@@ -20,6 +20,7 @@ function createMessages(): Message[] {
     {
       role: "assistant",
       content: "I will call echo.",
+      reasoningContent: "I should use a tool.",
       date: new Date("2025-01-01T00:00:02.000Z"),
       toolCalls: [
         {
@@ -77,6 +78,10 @@ describe("AmazonBedrockVAIProvider", () => {
         role: "assistant",
         content: [
           {
+            type: "reasoning",
+            text: "I should use a tool.",
+          },
+          {
             type: "text",
             text: "I will call echo.",
           },
@@ -108,6 +113,64 @@ describe("AmazonBedrockVAIProvider", () => {
         ],
       },
     ]);
+  });
+
+  it("passes reasoning parts in messages sent to generateText", async () => {
+    const generateTextImpl = vi.fn(async () => ({
+      finishReason: "stop",
+      toolCalls: Promise.resolve([]),
+      response: { messages: [] },
+    }));
+    const providerFactory = vi.fn((model: string) => ({ kind: "bedrock", model }));
+
+    const provider = new AmazonBedrockVAIProvider({
+      provider: providerFactory as any,
+      generateTextImpl: generateTextImpl as any,
+    });
+
+    await provider.generate({
+      model: "meta.llama3-70b-instruct-v1:0",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.arrayContaining([
+              { type: "reasoning", text: "I should use a tool." },
+            ]),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("omits tools from generateText when no tools are configured", async () => {
+    const generateTextImpl = vi.fn(async () => ({
+      finishReason: "stop",
+      toolCalls: Promise.resolve([]),
+      response: { messages: [] },
+    }));
+
+    const provider = new AmazonBedrockVAIProvider({
+      provider: vi.fn((model: string) => ({ kind: "bedrock", model })) as any,
+      generateTextImpl: generateTextImpl as any,
+    });
+
+    await provider.generate({
+      model: "meta.llama3-70b-instruct-v1:0",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.not.objectContaining({ tools: expect.anything() }),
+    );
   });
 
   it("builds AI SDK tools from runtime tool definitions", () => {
@@ -244,7 +307,67 @@ describe("AmazonBedrockVAIProvider", () => {
         },
       ],
       stopReason: "tool_calls",
+      providerStopReason: "tool-calls",
     });
+  });
+
+  it("extracts reasoning content from AI SDK assistant parts", async () => {
+    const provider = new AmazonBedrockVAIProvider({
+      provider: ((model: string) => ({ kind: "bedrock", model })) as any,
+      generateTextImpl: vi.fn(async () => ({
+        finishReason: "stop",
+        toolCalls: Promise.resolve([]),
+        response: {
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "reasoning", text: "Thinking..." },
+                { type: "text", text: "Answer" },
+              ],
+            },
+          ],
+        },
+      })) as any,
+    });
+
+    const result = await provider.generate({
+      model: "anthropic.claude-test",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.message?.content).toBe("Answer");
+    expect(result.message?.reasoningContent).toBe("Thinking...");
+  });
+
+  it("normalizes provider finish reasons and preserves raw provider stop reason", async () => {
+    const provider = new AmazonBedrockVAIProvider({
+      provider: vi.fn((model: string) => ({ kind: "bedrock", model })) as any,
+      generateTextImpl: vi.fn(async () => ({
+        finishReason: "content-filter",
+        toolCalls: Promise.resolve([]),
+        response: {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "" }],
+            },
+          ],
+        },
+      })) as any,
+    });
+
+    const result = await provider.generate({
+      model: "anthropic.claude-test",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.stopReason).toBe("content_filter");
+    expect(result.providerStopReason).toBe("content-filter");
   });
 
   it("returns no assistant message when generateText returns no text and no tool calls", async () => {
@@ -269,6 +392,7 @@ describe("AmazonBedrockVAIProvider", () => {
     expect(result).toEqual({
       toolCalls: [],
       stopReason: "stop",
+      providerStopReason: "stop",
     });
   });
 

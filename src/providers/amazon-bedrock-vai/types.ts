@@ -1,4 +1,5 @@
 import type { generateText } from "ai";
+import type { ReasoningOptions } from "../../core/types.js";
 import type {
   AmazonBedrockLanguageModelOptions,
   AmazonBedrockProvider,
@@ -23,5 +24,6 @@ export interface AmazonBedrockVAIProviderOptions
   provider?: AmazonBedrockProvider;
   maxRetries?: number;
   providerOptions?: AmazonBedrockVAIProviderSpecificOptions;
+  reasoning?: ReasoningOptions;
   generateTextImpl?: typeof generateText;
 }

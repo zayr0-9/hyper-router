@@ -3,7 +3,15 @@ import { createHash } from "node:crypto";
 import type { AgentDefinition } from "./agent.js";
 import type { ModelProvider } from "./providers.js";
 import type { SessionMetadata, StorageAdapter } from "./storage.js";
-import type { AgentRunInput, Message, RunStatus, ToolCall, ToolResult } from "./types.js";
+import type {
+  AgentRunInput,
+  GeneratedImage,
+  Message,
+  RunStatus,
+  StopReason,
+  ToolCall,
+  ToolResult,
+} from "./types.js";
 
 export interface RuntimeConfig {
   agent: AgentDefinition;
@@ -13,7 +21,10 @@ export interface RuntimeConfig {
 
 export interface RuntimeResult {
   status: RunStatus;
+  stopReason?: StopReason;
+  providerStopReason?: string;
   messages: Message[];
+  generatedImages?: GeneratedImage[];
 }
 
 export class AgentRuntime {
@@ -32,11 +43,14 @@ export class AgentRuntime {
       : this.config.storage.getSessionMetadata
         ? await this.config.storage.getSessionMetadata(input.sessionId)
         : null;
+    const currentSessionMetadata = isEphemeral
+      ? null
+      : this.buildSessionMetadata(previousSessionMetadata);
 
     const baseMessages: Message[] = this.config.agent.buildMessages
       ? await this.config.agent.buildMessages(input.input)
       : [{ role: "user", content: input.input, date: new Date() }];
-
+    // Ensure the system instructions are always the first message, followed by previous messages and then the new user input
     const messages: Message[] = [
       { role: "system", content: this.config.agent.instructions, date: new Date() },
       ...previousMessages,
@@ -44,61 +58,110 @@ export class AgentRuntime {
     ];
 
     let status: RunStatus = "max_steps_reached";
+    let stopReason: StopReason | undefined;
+    let providerStopReason: string | undefined;
+    const generatedImages: GeneratedImage[] = [];
 
-    for (let step = 1; step <= maxSteps; step += 1) {
-      const response = await this.config.provider.generate({
-        sessionId: input.sessionId,
-        model: this.config.agent.model,
-        messages,
-        tools: this.config.agent.tools ?? [],
-        previousSessionMetadata,
-        ephemeral: isEphemeral,
-      });
+    try {
+      for (let step = 1; step <= maxSteps; step += 1) {
+        const response = await this.config.provider.generate({
+          sessionId: input.sessionId,
+          model: this.config.agent.model,
+          messages,
+          tools: this.config.agent.tools ?? [],
+          previousSessionMetadata: currentSessionMetadata,
+          ephemeral: isEphemeral,
+        });
 
-      if (response.message) {
-        messages.push(response.message);
+        stopReason = response.stopReason;
+        providerStopReason = response.providerStopReason;
+
+        const toolCalls = this.canonicalizeToolCallIds(response.toolCalls ?? [], step);
+
+        if (response.message) {
+          messages.push(this.withCanonicalToolCallIds(response.message, toolCalls, step));
+        } else if (toolCalls.length > 0) {
+          messages.push({
+            role: "assistant",
+            content: "",
+            date: new Date(),
+            toolCalls,
+          });
+        }
+
+        if (response.generatedImages?.length) {
+          generatedImages.push(...response.generatedImages);
+        }
+
+        if (toolCalls.length === 0) {
+          status = "completed";
+          break;
+        }
+
+        const toolMessages = await this.executeToolCalls(input.sessionId, step, toolCalls);
+        messages.push(...toolMessages);
+        status = "needs_tool";
+
+        if (step === maxSteps) {
+          status = "max_steps_reached";
+          break;
+        }
+      }
+    } catch (error) {
+      status = "failed";
+
+      if (!isEphemeral) {
+        await this.persistRunState(input.sessionId, status, messages, currentSessionMetadata);
       }
 
-      const toolCalls = response.toolCalls ?? [];
-      if (toolCalls.length === 0) {
-        status = "completed";
-        break;
-      }
-
-      const toolMessages = await this.executeToolCalls(input.sessionId, step, toolCalls);
-      messages.push(...toolMessages);
-      status = "needs_tool";
-
-      if (step === maxSteps) {
-        status = "max_steps_reached";
-        break;
-      }
+      throw error;
     }
 
     if (!isEphemeral) {
-      const transcriptMessages = messages.filter((message) => message.role !== "system");
-
-      await this.config.storage.saveMessages(input.sessionId, transcriptMessages);
-      await this.config.storage.saveRun({
-        sessionId: input.sessionId,
-        status,
-      });
-      await this.updateSessionMetadata(input.sessionId);
+      await this.persistRunState(input.sessionId, status, messages, currentSessionMetadata);
     }
 
-    return { status, messages };
+    return {
+      status,
+      ...(stopReason ? { stopReason } : {}),
+      ...(providerStopReason ? { providerStopReason } : {}),
+      messages,
+      ...(generatedImages.length > 0 ? { generatedImages } : {}),
+    };
   }
 
-  private async updateSessionMetadata(sessionId: string): Promise<void> {
-    if (!this.config.storage.setSessionMetadata) {
+  private async persistRunState(
+    sessionId: string,
+    status: RunStatus,
+    messages: Message[],
+    metadata: SessionMetadata | null,
+  ): Promise<void> {
+    const transcriptMessages = messages.filter((message) => message.role !== "system");
+
+    await this.config.storage.saveMessages(sessionId, transcriptMessages);
+    await this.config.storage.saveRun({
+      sessionId,
+      status,
+    });
+    await this.updateSessionMetadata(sessionId, metadata);
+  }
+
+  private async updateSessionMetadata(
+    sessionId: string,
+    metadata: SessionMetadata | null,
+  ): Promise<void> {
+    if (!this.config.storage.setSessionMetadata || !metadata) {
       return;
     }
 
-    const existingMetadata = this.config.storage.getSessionMetadata
-      ? await this.config.storage.getSessionMetadata(sessionId)
-      : null;
+    await this.config.storage.setSessionMetadata(sessionId, {
+      ...metadata,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
-    const metadata: SessionMetadata = {
+  private buildSessionMetadata(existingMetadata: SessionMetadata | null): SessionMetadata {
+    return {
       ...existingMetadata,
       agentName: this.config.agent.name,
       model: this.config.agent.model,
@@ -115,12 +178,55 @@ export class AgentRuntime {
       ),
       updatedAt: new Date().toISOString(),
     };
-
-    await this.config.storage.setSessionMetadata(sessionId, metadata);
   }
 
   private hashValue(value: string): string {
     return createHash("sha256").update(value).digest("hex");
+  }
+
+  private formatError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private withCanonicalToolCallIds(
+    message: Message,
+    canonicalToolCalls: ToolCall[],
+    step: number,
+  ): Message {
+    if (!message.toolCalls?.length) {
+      return canonicalToolCalls.length > 0
+        ? {
+            ...message,
+            toolCalls: canonicalToolCalls,
+          }
+        : message;
+    }
+
+    if (message.toolCalls.length === canonicalToolCalls.length) {
+      return {
+        ...message,
+        toolCalls: message.toolCalls.map((toolCall, index) => ({
+          ...toolCall,
+          id: canonicalToolCalls[index]?.id ?? this.createToolCallId(toolCall, step, index),
+        })),
+      };
+    }
+
+    return {
+      ...message,
+      toolCalls: this.canonicalizeToolCallIds(message.toolCalls, step),
+    };
+  }
+
+  private canonicalizeToolCallIds(toolCalls: ToolCall[], step: number): ToolCall[] {
+    return toolCalls.map((toolCall, index) => ({
+      ...toolCall,
+      id: toolCall.id ?? this.createToolCallId(toolCall, step, index),
+    }));
+  }
+
+  private createToolCallId(toolCall: ToolCall, step: number, index: number): string {
+    return `${toolCall.toolName}-${step}-${index}`;
   }
 
   private async executeToolCalls(
@@ -131,7 +237,8 @@ export class AgentRuntime {
     const tools = new Map((this.config.agent.tools ?? []).map((tool) => [tool.name, tool]));
     const messages: Message[] = [];
 
-    for (const toolCall of toolCalls) {
+    for (const [index, toolCall] of toolCalls.entries()) {
+      const toolCallId = toolCall.id ?? this.createToolCallId(toolCall, step, index);
       const tool = tools.get(toolCall.toolName);
 
       let result: ToolResult;
@@ -141,7 +248,14 @@ export class AgentRuntime {
           error: `Unknown tool: ${toolCall.toolName}`,
         };
       } else {
-        result = await tool.execute(toolCall.args, { sessionId, step });
+        try {
+          result = await tool.execute(toolCall.args, { sessionId, step });
+        } catch (error) {
+          result = {
+            ok: false,
+            error: this.formatError(error),
+          };
+        }
       }
 
       messages.push({
@@ -149,7 +263,7 @@ export class AgentRuntime {
         name: toolCall.toolName,
         content: JSON.stringify(result),
         date: new Date(),
-        ...(toolCall.id ? { toolCallId: toolCall.id } : {}),
+        toolCallId,
       });
     }
 

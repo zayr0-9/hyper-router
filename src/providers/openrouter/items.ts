@@ -2,12 +2,17 @@ import type {
   FunctionCallOutputItem,
   OutputFunctionCallItem,
   OutputMessage,
+  OutputReasoningItem,
 } from "@openrouter/agent";
 
 import type { Message } from "../../core/types.js";
 import type { OpenRouterInputItem } from "./types.js";
 
-export function toInputItems(messages: Message[]): OpenRouterInputItem[] {
+export function toInputItems(
+  messages: Message[],
+  options: { includeReasoning?: boolean } = {},
+): OpenRouterInputItem[] {
+  const includeReasoning = options.includeReasoning ?? true;
   const items: OpenRouterInputItem[] = [];
 
   for (const [index, message] of messages.entries()) {
@@ -21,6 +26,21 @@ export function toInputItems(messages: Message[]): OpenRouterInputItem[] {
     }
 
     if (message.role === "assistant") {
+      if (includeReasoning && message.reasoningContent && message.reasoningContent.trim().length > 0) {
+        items.push({
+          id: toOpenRouterReasoningItemId(message, index),
+          type: "reasoning",
+          status: "completed",
+          content: [
+            {
+              type: "reasoning_text",
+              text: message.reasoningContent,
+            },
+          ],
+          summary: [],
+        } satisfies OutputReasoningItem);
+      }
+
       if (message.content && message.content.trim().length > 0) {
         items.push({
           id: toOpenRouterMessageItemId(message, index),
@@ -81,4 +101,8 @@ export function toInputItems(messages: Message[]): OpenRouterInputItem[] {
 
 export function toOpenRouterMessageItemId(message: Message, index: number): string {
   return `${message.role}-${message.date.getTime()}-${index}`;
+}
+
+export function toOpenRouterReasoningItemId(message: Message, index: number): string {
+  return `reasoning-${message.date.getTime()}-${index}`;
 }

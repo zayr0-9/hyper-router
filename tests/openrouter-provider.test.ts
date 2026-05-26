@@ -155,6 +155,45 @@ describe("OpenRouterProvider", () => {
     });
   });
 
+  it("maps assistant reasoning into OpenRouter reasoning items", () => {
+    const items = toInputItems([
+      {
+        role: "assistant",
+        content: "Done.",
+        reasoningContent: "I should preserve this for cache continuity.",
+        date: new Date("2025-01-01T00:00:03.000Z"),
+      },
+    ]);
+
+    expect(items).toEqual([
+      {
+        id: "reasoning-1735689603000-0",
+        type: "reasoning",
+        status: "completed",
+        content: [
+          {
+            type: "reasoning_text",
+            text: "I should preserve this for cache continuity.",
+          },
+        ],
+        summary: [],
+      },
+      {
+        id: "assistant-1735689603000-0",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [
+          {
+            type: "output_text",
+            text: "Done.",
+            annotations: [],
+          },
+        ],
+      },
+    ]);
+  });
+
   it("preserves assistant text alongside tool calls", () => {
     const items = toInputItems([
       {
@@ -348,6 +387,33 @@ describe("OpenRouterProvider", () => {
     ]);
   });
 
+  it("extracts reasoning content from full response output", async () => {
+    const provider = new OpenRouterProvider({
+      client: createMockClient(() => ({
+        getText: async () => "Answer",
+        getToolCalls: async () => [],
+        getResponse: async () => ({
+          output: [
+            {
+              type: "reasoning",
+              text: "I should inspect the image.",
+            },
+          ],
+        }),
+      })),
+    });
+
+    const result = await provider.generate({
+      model: "openai/gpt-5-mini",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.message?.content).toBe("Answer");
+    expect(result.message?.reasoningContent).toBe("I should inspect the image.");
+  });
+
   it("handles empty text with no tool calls", async () => {
     const provider = new OpenRouterProvider({
       client: createMockClient(() => ({
@@ -366,7 +432,7 @@ describe("OpenRouterProvider", () => {
 
     expect(result.message).toBeUndefined();
     expect(result.toolCalls).toEqual([]);
-    expect(result.stopReason).toBe("completed");
+    expect(result.stopReason).toBe("stop");
   });
 
   it("uses StateAccessor for session-backed calls in hybrid mode", async () => {

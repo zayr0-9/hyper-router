@@ -20,6 +20,7 @@ function createMessages(): Message[] {
     {
       role: "assistant",
       content: "I will call echo.",
+      reasoningContent: "I should use a tool.",
       date: new Date("2025-01-01T00:00:02.000Z"),
       toolCalls: [
         {
@@ -77,6 +78,10 @@ describe("OpenAIVAIProvider", () => {
         role: "assistant",
         content: [
           {
+            type: "reasoning",
+            text: "I should use a tool.",
+          },
+          {
             type: "text",
             text: "I will call echo.",
           },
@@ -108,6 +113,63 @@ describe("OpenAIVAIProvider", () => {
         ],
       },
     ]);
+  });
+
+  it("passes reasoning parts in messages sent to generateText", async () => {
+    const generateTextImpl = vi.fn(async () => ({
+      finishReason: "stop",
+      toolCalls: Promise.resolve([]),
+      response: { messages: [] },
+    }));
+
+    const provider = new OpenAIVAIProvider({
+      provider: ((model: string) => ({ kind: "auto", model })) as any,
+      generateTextImpl: generateTextImpl as any,
+    });
+
+    await provider.generate({
+      model: "gpt-5-mini",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            content: expect.arrayContaining([
+              { type: "reasoning", text: "I should use a tool." },
+            ]),
+          }),
+        ]),
+      }),
+    );
+  });
+
+  it("omits tools from generateText when no tools are configured", async () => {
+    const generateTextImpl = vi.fn(async () => ({
+      finishReason: "stop",
+      toolCalls: Promise.resolve([]),
+      response: { messages: [] },
+    }));
+
+    const provider = new OpenAIVAIProvider({
+      provider: ((model: string) => ({ kind: "auto", model })) as any,
+      generateTextImpl: generateTextImpl as any,
+    });
+
+    await provider.generate({
+      model: "gpt-5-mini",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.not.objectContaining({ tools: expect.anything() }),
+    );
   });
 
   it("builds AI SDK tools from runtime tool definitions", () => {
@@ -241,7 +303,67 @@ describe("OpenAIVAIProvider", () => {
         },
       ],
       stopReason: "tool_calls",
+      providerStopReason: "tool-calls",
     });
+  });
+
+  it("extracts reasoning content from AI SDK assistant parts", async () => {
+    const provider = new OpenAIVAIProvider({
+      provider: ((model: string) => ({ kind: "auto", model })) as any,
+      generateTextImpl: vi.fn(async () => ({
+        finishReason: "stop",
+        toolCalls: Promise.resolve([]),
+        response: {
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "reasoning", text: "I should reason first." },
+                { type: "text", text: "Answer" },
+              ],
+            },
+          ],
+        },
+      })) as any,
+    });
+
+    const result = await provider.generate({
+      model: "gpt-5-mini",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.message?.content).toBe("Answer");
+    expect(result.message?.reasoningContent).toBe("I should reason first.");
+  });
+
+  it("normalizes provider finish reasons and preserves raw provider stop reason", async () => {
+    const provider = new OpenAIVAIProvider({
+      provider: ((model: string) => ({ kind: "auto", model })) as any,
+      generateTextImpl: vi.fn(async () => ({
+        finishReason: "max_tokens",
+        toolCalls: Promise.resolve([]),
+        response: {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "partial" }],
+            },
+          ],
+        },
+      })) as any,
+    });
+
+    const result = await provider.generate({
+      model: "gpt-5-mini",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.stopReason).toBe("length");
+    expect(result.providerStopReason).toBe("max_tokens");
   });
 
   it("returns no assistant message when generateText returns no text and no tool calls", async () => {
@@ -266,6 +388,7 @@ describe("OpenAIVAIProvider", () => {
     expect(result).toEqual({
       toolCalls: [],
       stopReason: "stop",
+      providerStopReason: "stop",
     });
   });
 

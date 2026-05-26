@@ -30,7 +30,7 @@ export class StubProvider implements ModelProvider {
         content: `Stub response from ${input.model}: ${lastUserMessage?.content ?? ""}`,
         date: new Date(),
       },
-      stopReason: "completed",
+      stopReason: "stop",
     };
   }
 }

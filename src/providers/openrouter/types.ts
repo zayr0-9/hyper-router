@@ -5,6 +5,7 @@ import type {
 } from "@openrouter/agent";
 
 import type { SessionMetadata } from "../../core/storage.js";
+import type { ReasoningOptions } from "../../core/types.js";
 
 export interface OpenRouterClientLike {
   callModel: OpenRouter["callModel"];
@@ -35,6 +36,8 @@ export interface OpenRouterProviderOptions {
   apiKey?: string;
   client?: OpenRouterClientLike;
   continuation?: OpenRouterContinuationOptions;
+  reasoning?: ReasoningOptions;
+  callOptions?: Record<string, unknown>;
 }
 
 export interface OpenRouterToolCallLike {

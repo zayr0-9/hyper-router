@@ -1,6 +1,6 @@
 {
   "name": "@hyper-labs/hyper-router",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A minimal Node-first TypeScript agent runtime SDK boilerplate.",
   "repository": {
     "type": "git",
@@ -32,6 +32,10 @@
     "./providers/amazon-bedrock-vai": {
       "types": "./dist/providers/amazon-bedrock-vai/index.d.ts",
       "import": "./dist/providers/amazon-bedrock-vai/index.js"
+    },
+    "./providers/glm": {
+      "types": "./dist/providers/glm/index.d.ts",
+      "import": "./dist/providers/glm/index.js"
     },
     "./storage/in-memory": {
       "types": "./dist/storage/in-memory.d.ts",
@@ -77,6 +81,10 @@
     "smoke:openai:text": "tsx examples/openai-smoke.ts",
     "smoke:openai:tool": "tsx examples/openai-tool-smoke.ts",
     "smoke:openai:chain": "tsx examples/openai-tool-chain-smoke.ts",
+    "smoke:glm:text": "tsx examples/glm-smoke.ts",
+    "smoke:glm:reasoning": "tsx examples/glm-reasoning-smoke.ts",
+    "smoke:glm:tool": "tsx examples/glm-tool-smoke.ts",
+    "smoke:glm:chain": "tsx examples/glm-tool-chain-smoke.ts",
     "smoke:amazon-bedrock-vai:text": "tsx examples/amazon-bedrock-vai-smoke.ts",
     "smoke:amazon-bedrock-vai:tool": "tsx examples/amazon-bedrock-vai-tool-smoke.ts",
     "smoke:amazon-bedrock-vai:chain": "tsx examples/amazon-bedrock-vai-tool-chain-smoke.ts",

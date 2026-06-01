@@ -115,6 +115,32 @@ describe("OpenAIVAIProvider", () => {
     ]);
   });
 
+  it("passes abort signals to generateText", async () => {
+    const controller = new AbortController();
+    const generateTextImpl = vi.fn(async () => ({
+      finishReason: "stop",
+      toolCalls: Promise.resolve([]),
+      response: { messages: [] },
+    }));
+
+    const provider = new OpenAIVAIProvider({
+      provider: ((model: string) => ({ kind: "auto", model })) as any,
+      generateTextImpl: generateTextImpl as any,
+    });
+
+    await provider.generate({
+      model: "gpt-5-mini",
+      messages: createMessages().slice(0, 2),
+      tools: [],
+      previousSessionMetadata: null,
+      signal: controller.signal,
+    });
+
+    expect(generateTextImpl).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: controller.signal }),
+    );
+  });
+
   it("passes reasoning parts in messages sent to generateText", async () => {
     const generateTextImpl = vi.fn(async () => ({
       finishReason: "stop",

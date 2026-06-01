@@ -256,6 +256,134 @@ Run the basic example:
 npx tsx examples/basic.ts
 ```
 
+## Runtime cancellation
+
+Runs can be cancelled either with a caller-owned `AbortController` or by using the runtime's lightweight active-run registry. Use a stable `runId` when your harness has parallel streams and needs to stop one specific stream.
+
+```ts
+const runtime = createRuntime({ agent, provider, storage });
+
+const promise = runtime.run({
+  sessionId: "session-1",
+  runId: "stream-abc123",
+  input: "Do a long task",
+});
+
+// Stop only this in-process run:
+runtime.cancel("stream-abc123", "user clicked stop");
+
+const result = await promise;
+console.log(result.status); // "cancelled"
+```
+
+You can also pass a signal directly:
+
+```ts
+const controller = new AbortController();
+
+const promise = runtime.run({
+  sessionId: "session-1",
+  input: "Do a long task",
+  signal: controller.signal,
+});
+
+controller.abort("user clicked stop");
+```
+
+Cancellation is cooperative for local tools: tool `execute` functions receive `context.signal` and should stop promptly when it aborts. Built-in providers receive the same signal; providers that expose request abort support can stop the network call directly.
+
+## Tool permissions
+
+Tools can opt into host-mediated permission checks before execution. The runtime stays UI-neutral: it emits a structured permission request through hooks, and your app/harness decides how to ask the user.
+
+```ts
+const writeFileTool = defineTool<{ path: string; content: string }, { path: string }>({
+  name: "write_file",
+  description: "Write text to a local file.",
+  permission: {
+    mode: "ask",
+    reason: "Writes to the filesystem.",
+    metadata: { category: "filesystem" },
+  },
+  async execute(args) {
+    // perform the write after permission is granted
+    return { ok: true, output: { path: args.path } };
+  },
+});
+
+const runtime = createRuntime({
+  agent,
+  provider,
+  storage,
+  hooks: {
+    async requestToolPermission(request) {
+      // Bridge this to a terminal modal, web dialog, JSON-lines sidecar, etc.
+      // The request includes sessionId, step, toolCallId, toolName, args,
+      // description, inputSchema, and optional tool metadata.
+      const allowed = await askUserInYourHarness(request);
+      return allowed
+        ? { type: "allow" }
+        : { type: "deny", reason: "User denied the request." };
+    },
+  },
+});
+```
+
+Permission modes:
+
+- omitted or `{ mode: "always" }` - execute normally
+- `{ mode: "ask" }` - call `hooks.requestToolPermission(...)` before execution
+- `{ mode: "never" }` - return a denied tool result without executing
+
+You can also force a default policy for all tools from the runtime:
+
+```ts
+const runtime = createRuntime({
+  agent,
+  provider,
+  storage,
+  toolPermission: { defaultMode: "ask" },
+  hooks: {
+    requestToolPermission: async (request) => bridgeToHarness(request),
+  },
+});
+```
+
+If a tool explicitly asks for permission and no hook is configured, the runtime denies that tool call safely. Denials are recorded as normal `role: "tool"` results with the matching `toolCallId`, preserving transcript replay for providers.
+
+## Tool call lifecycle hooks
+
+Tool call lifecycle hooks are optional and protocol-neutral. If omitted, Hyper Router behaves exactly as before. Applications can use them to stream tool-call status to clients, collect telemetry, or bridge tool events into their own harness protocol.
+
+```ts
+const runtime = createRuntime({
+  agent,
+  provider,
+  storage,
+  hooks: {
+    async onToolCallStart(event) {
+      // Fired after permission is allowed and immediately before execute().
+      // Includes sessionId, step, toolCallId, toolName, args, status, and startedAt.
+      console.log("tool started", event.toolName, event.toolCallId);
+    },
+    async onToolCallFinish(event) {
+      // Fired when a tool call resolves.
+      // status is one of: completed, failed, denied, unknown_tool.
+      // Successful/failed executions also include startedAt and durationMs.
+      console.log("tool finished", event.status, event.result);
+    },
+  },
+});
+```
+
+For registered tools that execute, the order is:
+
+```txt
+permission check, if configured -> onToolCallStart -> execute -> onToolCallFinish -> append role: "tool" message
+```
+
+For denied or unknown tool calls, `onToolCallStart` is not fired because no tool execution begins, but `onToolCallFinish` is fired with `status: "denied"` or `status: "unknown_tool"`. Lifecycle hooks are awaited; if a hook is best-effort telemetry, catch transport errors inside your hook.
+
 ## OpenRouter provider
 
 This SDK includes an `OpenRouterProvider` implemented with `@openrouter/agent`.

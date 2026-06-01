@@ -61,6 +61,36 @@ describe("GLMProvider", () => {
     expect(result.stopReason).toBe("stop");
   });
 
+  it("passes abort signals to fetch", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | null | undefined;
+
+    const provider = new GLMProvider({
+      apiKey: "test-key",
+      fetch: async (_input, init) => {
+        capturedSignal = init?.signal;
+        return createResponse({
+          choices: [
+            {
+              message: { role: "assistant", content: "done" },
+              finish_reason: "stop",
+            },
+          ],
+        });
+      },
+    });
+
+    await provider.generate({
+      model: "glm-5.1",
+      messages: [{ role: "user", content: "Hi", date: new Date() }],
+      tools: [],
+      previousSessionMetadata: null,
+      signal: controller.signal,
+    });
+
+    expect(capturedSignal).toBe(controller.signal);
+  });
+
   it("injects thinking and raw body options into requests", async () => {
     let capturedBody: Record<string, unknown> | undefined;
 

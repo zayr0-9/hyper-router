@@ -16,11 +16,31 @@ export interface ToolResult<TOutput = unknown> {
   error?: string;
 }
 
+export type ToolPermissionDecision =
+  | { type: "allow" }
+  | { type: "deny"; reason?: string };
+
+export interface ToolPermissionRequest {
+  id: string;
+  sessionId: string;
+  step: number;
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  description?: string;
+  inputSchema?: unknown;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AgentRunInput {
   sessionId: string;
   input: string;
   maxSteps?: number;
   ephemeral?: boolean;
+  /** Optional caller-provided identifier for cancelling a specific parallel run. */
+  runId?: string;
+  /** Optional caller-provided signal used to cancel this run. */
+  signal?: AbortSignal;
 }
 
 export type RunStatus =
@@ -29,7 +49,8 @@ export type RunStatus =
   | "waiting_for_user"
   | "max_steps_reached"
   | "failed"
-  | "waiting_for_permission";
+  | "waiting_for_permission"
+  | "cancelled";
 
 export type PauseReason =
   | "waiting_for_user"
@@ -43,6 +64,7 @@ export type StopReason =
   | "content_filter"
   | "refusal"
   | "provider_error"
+  | "cancelled"
   | "unknown";
 
 export type ToolCallStatus =
@@ -51,6 +73,34 @@ export type ToolCallStatus =
   | "completed"
   | "failed"
   | "cancelled";
+
+export type ToolCallLifecycleStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "denied"
+  | "unknown_tool";
+
+export interface ToolCallLifecycleEventBase {
+  sessionId: string;
+  step: number;
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+}
+
+export interface ToolCallStartEvent extends ToolCallLifecycleEventBase {
+  status: "running";
+  startedAt: string;
+}
+
+export interface ToolCallFinishEvent extends ToolCallLifecycleEventBase {
+  status: Exclude<ToolCallLifecycleStatus, "running">;
+  result: ToolResult;
+  startedAt?: string;
+  finishedAt: string;
+  durationMs?: number;
+}
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -89,4 +139,6 @@ export interface ModelResponse {
 export interface AgentContext {
   sessionId: string;
   step: number;
+  runId?: string;
+  signal?: AbortSignal;
 }

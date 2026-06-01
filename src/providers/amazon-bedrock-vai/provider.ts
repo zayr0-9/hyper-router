@@ -49,11 +49,13 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
 
   async generate(input: {
     sessionId?: string;
+    runId?: string;
     model: string;
     messages: Message[];
     tools: AnyToolDefinition[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
+    signal?: AbortSignal;
   }): Promise<ModelResponse> {
     const tools = this.toAiSdkTools(input.tools);
     const providerOptions = this.buildProviderOptions();
@@ -69,6 +71,7 @@ export class AmazonBedrockVAIProvider implements ModelProvider {
           }
         : {}),
       ...(this.maxRetries !== undefined ? { maxRetries: this.maxRetries } : {}),
+      ...(input.signal ? { abortSignal: input.signal } : {}),
     });
 
     const responseMessages = result.response.messages;

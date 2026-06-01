@@ -68,15 +68,18 @@ export class GLMProvider implements ModelProvider {
 
   async generate(input: {
     sessionId?: string;
+    runId?: string;
     model: string;
     messages: Message[];
     tools: AnyToolDefinition[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
+    signal?: AbortSignal;
   }): Promise<ModelResponse> {
     const response = await this.fetchImpl(this.chatCompletionsUrl(), {
       method: "POST",
       headers: this.buildHeaders(),
+      ...(input.signal ? { signal: input.signal } : {}),
       body: JSON.stringify({
         model: input.model,
         messages: this.toGLMMessages(input.messages),

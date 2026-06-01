@@ -81,12 +81,15 @@ export class OpenRouterProvider implements ModelProvider {
 
   async generate(input: {
     sessionId?: string;
+    runId?: string;
     model: string;
     messages: Message[];
     tools: AnyToolDefinition[];
     previousSessionMetadata?: SessionMetadata | null;
     ephemeral?: boolean;
+    signal?: AbortSignal;
   }): Promise<ModelResponse> {
+    input.signal?.throwIfAborted();
     const toolDefs = input.tools.map((tool) =>
       openRouterTool({
         name: tool.name,
@@ -141,9 +144,14 @@ export class OpenRouterProvider implements ModelProvider {
           ? toInputItems(externalMessages, { includeReasoning: this.shouldIncludeReasoningInMessages() })
           : toInputItems(input.messages, { includeReasoning: this.shouldIncludeReasoningInMessages() });
 
+    const callOptions = {
+      ...this.buildCallOptions(),
+      ...(input.signal ? { signal: input.signal } : {}),
+    };
+
     const callResult = useState && sessionId
       ? this.client.callModel({
-          ...this.buildCallOptions(),
+          ...callOptions,
           model: input.model,
           input: requestInput,
           tools: toolDefs,
@@ -154,7 +162,7 @@ export class OpenRouterProvider implements ModelProvider {
           }),
         })
       : this.client.callModel({
-          ...this.buildCallOptions(),
+          ...callOptions,
           model: input.model,
           input: requestInput,
           tools: toolDefs,
@@ -165,6 +173,7 @@ export class OpenRouterProvider implements ModelProvider {
       callResult.getToolCalls(),
       callResult.getResponse(),
     ]);
+    input.signal?.throwIfAborted();
     const normalizedToolCalls = this.normalizeToolCalls(toolCalls as OpenRouterToolCallLike[]);
     const generatedImages = this.extractGeneratedImages(fullResponse as { output?: Array<{ type?: unknown; result?: unknown }> });
     const reasoningContent = this.shouldCaptureReasoning()

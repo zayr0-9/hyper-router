@@ -113,6 +113,7 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
       },
     }).run({
       sessionId: "success-lifecycle-session",
+      runId: "run_test_1",
       input: "Echo hello.",
       maxSteps: 2,
     });
@@ -121,6 +122,7 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
     expect(events).toEqual(["start", "execute", "finish"]);
     expect(onToolCallStart).toHaveBeenCalledWith({
       sessionId: "success-lifecycle-session",
+      runId: "run_test_1",
       step: 1,
       toolCallId: "call_echo",
       toolName: "echo",
@@ -130,6 +132,7 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
     });
     expect(onToolCallFinish).toHaveBeenCalledWith({
       sessionId: "success-lifecycle-session",
+      runId: "run_test_1",
       step: 1,
       toolCallId: "call_echo",
       toolName: "echo",
@@ -231,6 +234,7 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
     expect(onToolCallStart).not.toHaveBeenCalled();
     expect(onToolCallFinish).toHaveBeenCalledWith({
       sessionId: "denied-lifecycle-session",
+      runId: expect.any(String),
       step: 1,
       toolCallId: "call_echo",
       toolName: "echo",
@@ -267,6 +271,7 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
     expect(onToolCallStart).not.toHaveBeenCalled();
     expect(onToolCallFinish).toHaveBeenCalledWith({
       sessionId: "unknown-lifecycle-session",
+      runId: expect.any(String),
       step: 1,
       toolCallId: "call_missing_tool",
       toolName: "missing_tool",
@@ -275,5 +280,39 @@ describe("AgentRuntime tool call lifecycle hooks", () => {
       result: { ok: false, error: "Unknown tool: missing_tool" },
       finishedAt: expect.any(String),
     });
+  });
+
+  it("emits generated runId in lifecycle hooks when caller omits runId", async () => {
+    const execute = vi.fn(async () => ({ ok: true, output: { ok: true } }));
+    const onToolCallStart = vi.fn();
+    const onToolCallFinish = vi.fn();
+    const tool = defineTool({
+      name: "echo",
+      description: "Echo text.",
+      execute,
+    });
+
+    await createRuntime({
+      agent: defineAgent({
+        name: "generated-run-lifecycle-agent",
+        instructions: "Use tools.",
+        model: "stub-model",
+        tools: [tool],
+      }),
+      provider: createSingleToolCallProvider(),
+      storage: new InMemoryStorage(),
+      hooks: { onToolCallStart, onToolCallFinish },
+    }).run({
+      sessionId: "generated-run-lifecycle-session",
+      input: "Echo hello.",
+      maxSteps: 1,
+    });
+
+    expect(onToolCallStart).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: expect.any(String), status: "running" }),
+    );
+    expect(onToolCallFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: expect.any(String), status: "completed" }),
+    );
   });
 });

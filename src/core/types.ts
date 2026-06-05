@@ -23,6 +23,7 @@ export type ToolPermissionDecision =
 export interface ToolPermissionRequest {
   id: string;
   sessionId: string;
+  runId?: string;
   step: number;
   toolCallId: string;
   toolName: string;
@@ -83,6 +84,7 @@ export type ToolCallLifecycleStatus =
 
 export interface ToolCallLifecycleEventBase {
   sessionId: string;
+  runId?: string;
   step: number;
   toolCallId: string;
   toolName: string;

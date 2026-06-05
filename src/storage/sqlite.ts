@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import initSqlJs from "sql.js";
 
 import type { Message } from "../core/types.js";
-import type { RunRecord, SessionMetadata, StorageAdapter } from "./types.js";
+import type { RunRecord, SessionMetadata, SessionState, StorageAdapter } from "./types.js";
 
 interface SqliteStorageOptions {
   filePath: string;
@@ -67,6 +67,16 @@ export class SqliteStorage implements StorageAdapter {
         [sessionId, serialized],
       );
     }, { persist: true });
+  }
+
+  async getSessionState(sessionId: string): Promise<SessionState> {
+    const messages = await this.loadMessages(sessionId);
+    const metadata = this.getSessionMetadata ? await this.getSessionMetadata(sessionId) : null;
+    return {
+      revision: messages.length,
+      messageCount: messages.length,
+      metadata,
+    };
   }
 
   async saveRun(record: RunRecord): Promise<void> {

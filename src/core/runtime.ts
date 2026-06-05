@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { AgentDefinition } from "./agent.js";
 import type { ModelProvider } from "./providers.js";
-import type { SessionMetadata, StorageAdapter } from "./storage.js";
+import type { CommitRunResult, SessionMetadata, StorageAdapter, StorageAdapterV2 } from "./storage.js";
 import type { AnyToolDefinition, ToolPermissionMode } from "./tool.js";
 import type {
   AgentRunInput,
@@ -49,6 +49,9 @@ export interface RuntimeResult {
   providerStopReason?: string;
   messages: Message[];
   generatedImages?: GeneratedImage[];
+  sessionId?: string;
+  revision?: number;
+  messageCount?: number;
 }
 
 export interface ActiveRunInfo {
@@ -118,6 +121,11 @@ export class AgentRuntime {
     const isEphemeral = input.ephemeral ?? false;
     let currentSessionMetadata: SessionMetadata | null = null;
     let messages: Message[] = [];
+    let previousMessages: Message[] = [];
+    let baseRevision: number | undefined;
+    let baseMessageCount: number | undefined;
+    let committedSessionId = input.sessionId;
+    let commitResult: CommitRunResult | undefined;
     let status: RunStatus = "max_steps_reached";
     let stopReason: StopReason | undefined;
     let providerStopReason: string | undefined;
@@ -126,11 +134,25 @@ export class AgentRuntime {
     try {
       this.throwIfAborted(signal);
 
-      const previousMessages = isEphemeral
+      previousMessages = isEphemeral
         ? []
         : (await this.config.storage.loadMessages(input.sessionId)).filter(
             (message) => message.role !== "system",
           );
+      if (!isEphemeral) {
+        const storageV2 = this.getStorageV2();
+        const sessionState = storageV2.getSessionState
+          ? await storageV2.getSessionState(input.sessionId)
+          : undefined;
+        baseRevision = sessionState?.revision;
+        baseMessageCount = sessionState?.messageCount ?? previousMessages.length;
+        await storageV2.beginRun?.({
+          runId,
+          sessionId: input.sessionId,
+          baseRevision,
+          baseMessageCount,
+        });
+      }
       const previousSessionMetadata = isEphemeral
         ? null
         : this.config.storage.getSessionMetadata
@@ -208,13 +230,21 @@ export class AgentRuntime {
         stopReason = "cancelled";
 
         if (!isEphemeral) {
-          await this.persistRunState(input.sessionId, status, messages, currentSessionMetadata);
+          commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
+            baseRevision,
+            baseMessageCount,
+            previousMessages,
+          });
+          committedSessionId = commitResult?.sessionId ?? input.sessionId;
         }
 
         return {
           status,
           stopReason,
           messages,
+          sessionId: committedSessionId,
+          ...(commitResult?.revision !== undefined ? { revision: commitResult.revision } : {}),
+          ...(commitResult?.messageCount !== undefined ? { messageCount: commitResult.messageCount } : {}),
           ...(generatedImages.length > 0 ? { generatedImages } : {}),
         };
       }
@@ -222,7 +252,12 @@ export class AgentRuntime {
       status = "failed";
 
       if (!isEphemeral) {
-        await this.persistRunState(input.sessionId, status, messages, currentSessionMetadata);
+        commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
+          baseRevision,
+          baseMessageCount,
+          previousMessages,
+        });
+        committedSessionId = commitResult?.sessionId ?? input.sessionId;
       }
 
       throw error;
@@ -231,7 +266,12 @@ export class AgentRuntime {
     }
 
     if (!isEphemeral) {
-      await this.persistRunState(input.sessionId, status, messages, currentSessionMetadata);
+      commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
+        baseRevision,
+        baseMessageCount,
+        previousMessages,
+      });
+      committedSessionId = commitResult?.sessionId ?? input.sessionId;
     }
 
     return {
@@ -239,17 +279,51 @@ export class AgentRuntime {
       ...(stopReason ? { stopReason } : {}),
       ...(providerStopReason ? { providerStopReason } : {}),
       messages,
+      sessionId: committedSessionId,
+      ...(commitResult?.revision !== undefined ? { revision: commitResult.revision } : {}),
+      ...(commitResult?.messageCount !== undefined ? { messageCount: commitResult.messageCount } : {}),
       ...(generatedImages.length > 0 ? { generatedImages } : {}),
     };
   }
 
   private async persistRunState(
     sessionId: string,
+    runId: string,
     status: RunStatus,
     messages: Message[],
     metadata: SessionMetadata | null,
-  ): Promise<void> {
+    base?: {
+      baseRevision?: number | undefined;
+      baseMessageCount?: number | undefined;
+      previousMessages?: Message[] | undefined;
+    },
+  ): Promise<CommitRunResult | undefined> {
     const transcriptMessages = messages.filter((message) => message.role !== "system");
+    const storageV2 = this.getStorageV2();
+
+    if (storageV2.commitRun) {
+      const previousMessages = base?.previousMessages ?? [];
+      const newMessages = transcriptMessages.slice(previousMessages.length);
+      const result = await storageV2.commitRun({
+        runId,
+        sessionId,
+        status,
+        baseRevision: base?.baseRevision,
+        baseMessageCount: base?.baseMessageCount,
+        previousMessages,
+        newMessages,
+        fullMessages: transcriptMessages,
+        metadata,
+      });
+
+      if (result.conflict) {
+        throw new Error(
+          `Storage commit conflict for session ${sessionId}: ${result.conflictReason ?? "unknown"}`,
+        );
+      }
+
+      return result;
+    }
 
     await this.config.storage.saveMessages(sessionId, transcriptMessages);
     await this.config.storage.saveRun({
@@ -257,6 +331,14 @@ export class AgentRuntime {
       status,
     });
     await this.updateSessionMetadata(sessionId, metadata);
+    return {
+      sessionId,
+      messageCount: transcriptMessages.length,
+    };
+  }
+
+  private getStorageV2(): StorageAdapterV2 {
+    return this.config.storage as StorageAdapterV2;
   }
 
   private async updateSessionMetadata(
@@ -369,6 +451,7 @@ export class AgentRuntime {
       const tool = tools.get(toolCall.toolName);
       const lifecycleBase = {
         sessionId,
+        runId,
         step,
         toolCallId,
         toolName: toolCall.toolName,
@@ -390,6 +473,7 @@ export class AgentRuntime {
       } else {
         const permission = await this.resolveToolPermission({
           sessionId,
+          runId,
           step,
           toolCall,
           toolCallId,
@@ -457,6 +541,7 @@ export class AgentRuntime {
 
   private async resolveToolPermission(input: {
     sessionId: string;
+    runId: string;
     step: number;
     toolCall: ToolCall;
     toolCallId: string;
@@ -481,6 +566,7 @@ export class AgentRuntime {
     const request: ToolPermissionRequest = {
       id: `permission-${input.toolCallId}`,
       sessionId: input.sessionId,
+      runId: input.runId,
       step: input.step,
       toolCallId: input.toolCallId,
       toolName: input.toolCall.toolName,

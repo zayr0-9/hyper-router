@@ -96,7 +96,7 @@ describe("AgentRuntime tool permissions", () => {
       ok: true,
       output: { echoed: args.text },
     }));
-    const requestToolPermission = vi.fn(async () => ({ type: "allow" as const }));
+    const requestToolPermission = vi.fn(async (_request: ToolPermissionRequest) => ({ type: "allow" as const }));
     const onToolPermissionRequested = vi.fn();
     const onToolPermissionResolved = vi.fn();
 
@@ -124,6 +124,7 @@ describe("AgentRuntime tool permissions", () => {
       },
     }).run({
       sessionId: "ask-permission-session",
+      runId: "run_test_1",
       input: "Echo hello.",
       maxSteps: 1,
     });
@@ -131,6 +132,7 @@ describe("AgentRuntime tool permissions", () => {
     const expectedRequest: ToolPermissionRequest = {
       id: "permission-call_echo",
       sessionId: "ask-permission-session",
+      runId: "run_test_1",
       step: 1,
       toolCallId: "call_echo",
       toolName: "echo",
@@ -223,7 +225,7 @@ describe("AgentRuntime tool permissions", () => {
 
   it("denies never tools without calling permission hooks or execute", async () => {
     const execute = vi.fn(async () => ({ ok: true, output: { shouldNotRun: true } }));
-    const requestToolPermission = vi.fn(async () => ({ type: "allow" as const }));
+    const requestToolPermission = vi.fn(async (_request: ToolPermissionRequest) => ({ type: "allow" as const }));
     const tool = defineTool({
       name: "echo",
       description: "Echo text.",
@@ -260,7 +262,7 @@ describe("AgentRuntime tool permissions", () => {
 
   it("can force all tools through runtime default ask policy", async () => {
     const execute = vi.fn(async () => ({ ok: true, output: { allowed: true } }));
-    const requestToolPermission = vi.fn(async () => ({ type: "allow" as const }));
+    const requestToolPermission = vi.fn(async (_request: ToolPermissionRequest) => ({ type: "allow" as const }));
     const tool = defineTool({
       name: "echo",
       description: "Echo text.",
@@ -292,5 +294,40 @@ describe("AgentRuntime tool permissions", () => {
       }),
     );
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("emits generated runId in permission requests when caller omits runId", async () => {
+    const requestToolPermission = vi.fn(async (_request: ToolPermissionRequest) => ({ type: "allow" as const }));
+    const onToolPermissionRequested = vi.fn();
+    const onToolPermissionResolved = vi.fn();
+    const tool = defineTool({
+      name: "echo",
+      description: "Echo text.",
+      permission: { mode: "ask" },
+      async execute() {
+        return { ok: true, output: { ok: true } };
+      },
+    });
+
+    await createRuntime({
+      agent: defineAgent({
+        name: "generated-run-permission-agent",
+        instructions: "Use tools.",
+        model: "stub-model",
+        tools: [tool],
+      }),
+      provider: createSingleToolCallProvider(),
+      storage: new InMemoryStorage(),
+      hooks: { requestToolPermission, onToolPermissionRequested, onToolPermissionResolved },
+    }).run({
+      sessionId: "generated-run-permission-session",
+      input: "Echo hello.",
+      maxSteps: 1,
+    });
+
+    const request = requestToolPermission.mock.calls[0]?.[0];
+    expect(request).toEqual(expect.objectContaining({ runId: expect.any(String) }));
+    expect(onToolPermissionRequested).toHaveBeenCalledWith(request);
+    expect(onToolPermissionResolved).toHaveBeenCalledWith(request, { type: "allow" });
   });
 });

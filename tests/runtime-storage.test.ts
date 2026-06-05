@@ -731,3 +731,80 @@ describe("AgentRuntime failure handling", () => {
     ]);
   });
 });
+
+
+describe("AgentRuntime storage V2", () => {
+  it("uses commitRun when provided and passes append-oriented run details", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "v2 ack",
+          date: new Date("2025-01-01T00:00:30.000Z"),
+        },
+        stopReason: "stop",
+      })),
+    };
+
+    const storage = new InMemoryStorage();
+    await storage.saveMessages("v2-session", [
+      { role: "user", content: "Existing", date: new Date("2025-01-01T00:00:00.000Z") },
+    ]);
+    const saveMessagesSpy = vi.spyOn(storage, "saveMessages");
+    const saveRunSpy = vi.spyOn(storage, "saveRun");
+    const commitRun = vi.fn(async (record) => ({
+      sessionId: record.sessionId,
+      revision: 3,
+      messageCount: record.fullMessages.length,
+    }));
+    const storageV2 = Object.assign(storage, {
+      async getSessionState() {
+        return { revision: 1, messageCount: 1 };
+      },
+      commitRun,
+    });
+
+    const runtime = createRuntime({
+      agent: defineAgent({
+        name: "v2-agent",
+        instructions: "Be helpful.",
+        model: "stub-model",
+      }),
+      provider,
+      storage: storageV2,
+    });
+
+    const result = await runtime.run({
+      sessionId: "v2-session",
+      input: "Next",
+      runId: "run-v2",
+    });
+
+    expect(result).toMatchObject({
+      sessionId: "v2-session",
+      revision: 3,
+      messageCount: 3,
+    });
+    expect(commitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-v2",
+        sessionId: "v2-session",
+        status: "completed",
+        baseRevision: 1,
+        baseMessageCount: 1,
+        previousMessages: [expect.objectContaining({ role: "user", content: "Existing" })],
+        newMessages: [
+          expect.objectContaining({ role: "user", content: "Next" }),
+          expect.objectContaining({ role: "assistant", content: "v2 ack" }),
+        ],
+        fullMessages: [
+          expect.objectContaining({ role: "user", content: "Existing" }),
+          expect.objectContaining({ role: "user", content: "Next" }),
+          expect.objectContaining({ role: "assistant", content: "v2 ack" }),
+        ],
+      }),
+    );
+    expect(saveMessagesSpy).not.toHaveBeenCalled();
+    expect(saveRunSpy).not.toHaveBeenCalled();
+  });
+});

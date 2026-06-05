@@ -1,6 +1,6 @@
 {
   "name": "@hyper-labs/hyper-router",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "A minimal Node-first TypeScript agent runtime SDK boilerplate.",
   "repository": {
     "type": "git",

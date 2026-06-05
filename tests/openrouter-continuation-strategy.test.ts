@@ -186,7 +186,7 @@ describe("OpenRouter continuation strategy selection", () => {
     ]);
   });
 
-  it("state mode bootstraps from external messages only", async () => {
+  it("state mode bootstraps from full transcript when no native state exists", async () => {
     let request: MockCallModelRequest | undefined;
     const provider = new OpenRouterProvider({
       client: createMockClient((captured) => {
@@ -211,9 +211,22 @@ describe("OpenRouter continuation strategy selection", () => {
     expect(request?.state).toBeDefined();
     expect(request?.input).toEqual([
       {
+        id: "system-1735689600000-0",
+        type: "message",
+        role: "system",
+        content: [{ type: "input_text", text: "You are helpful." }],
+      },
+      {
         type: "message",
         role: "user",
         content: [{ type: "input_text", text: "Start" }],
+      },
+      {
+        id: "assistant-1735689602000-2",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "I will use a tool.", annotations: [] }],
       },
       {
         type: "function_call_output",

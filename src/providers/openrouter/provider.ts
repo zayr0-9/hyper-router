@@ -137,12 +137,9 @@ export class OpenRouterProvider implements ModelProvider {
       }
     }
 
-    const requestInput: OpenRouterInputItem[] =
-      useState && hasExistingState
-        ? []
-        : this.continuationStrategy === "state"
-          ? toInputItems(externalMessages, { includeReasoning: this.shouldIncludeReasoningInMessages() })
-          : toInputItems(input.messages, { includeReasoning: this.shouldIncludeReasoningInMessages() });
+    const requestInput: OpenRouterInputItem[] = useState && hasExistingState
+      ? []
+      : toInputItems(input.messages, { includeReasoning: this.shouldIncludeReasoningInMessages() });
 
     const callOptions = {
       ...this.buildCallOptions(),

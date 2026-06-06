@@ -70,14 +70,32 @@ Preserve these across runtime, storage, and provider changes:
 - `toolCallId` links assistant tool calls to `role: "tool"` result messages.
 - Provider replay should send stored transcript messages back with minimal transformation.
 
-## Coding conventions
+## Conventions to follow
 
+- Keep changes small, readable, and consistent with existing naming/style.
+  - Example: prefer a focused helper over a broad provider/runtime rewrite.
 - TypeScript ESM with `moduleResolution: "NodeNext"`; relative imports include `.js` extensions.
+  - Example: `import type { Message } from "./types.js";`
+- Prefer `unknown` plus narrowing over `any`; avoid introducing `any` wherever practical.
+  - Prefer: `const value: unknown = JSON.parse(text); if (isRecord(value)) { ... }`
+  - Avoid: `const value: any = JSON.parse(text);`
+- Treat casts as boundary tools, not normal implementation style.
+  - Example: keep provider response casts inside a small extractor/normalizer instead of spreading `as any` through core code.
 - Strict TypeScript is enabled, including `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
+  - Example: check indexed values before use: `const item = items[0]; if (!item) return;`
 - Avoid assigning explicit `undefined` to optional properties; use conditional object spreads.
-- Keep changes small and preserve existing naming/style.
+  - Prefer: `{ ...(reason ? { reason } : {}) }`
+  - Avoid: `{ reason: undefined }`
+- Keep runtime/provider/storage boundaries clean.
+  - Runtime executes tools and permissions; providers normalize model I/O; storage persists transcripts.
+- Preserve transcript invariants before provider-specific optimization.
+  - Example: keep assistant text, `reasoningContent`, `toolCalls`, tool result JSON, and `toolCallId` links intact.
+- Centralize tool schema handling through `src/core/schema.ts` where possible.
+  - Example: use `normalizeSchema(...)` instead of duplicating Zod/JSON Schema detection.
+- Prefer additive public API changes; update exports, README/docs, and tests together when public behavior or public types change.
+  - Example: a new public subpath needs `package.json` exports, subpath `index.ts`, docs, and tests.
 - Use fake clients/providers/fetch functions in unit tests; do not hit network APIs in unit tests.
-- Update README/docs/tests when changing public behavior or public types.
+  - Example: inject `generateTextImpl`, fake fetch, or a fake `ModelProvider`; reserve smoke scripts for live provider checks.
 
 ## Public package shape
 

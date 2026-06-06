@@ -197,13 +197,13 @@ export class OpenRouterProvider implements ModelProvider {
         ...(reasoningContent ? { reasoningContent } : {}),
         ...(normalizedToolCalls.length > 0 ? { toolCalls: normalizedToolCalls } : {}),
       };
-    } else if (normalizedToolCalls.length > 0) {
+    } else if (normalizedToolCalls.length > 0 || reasoningContent) {
       response.message = {
         role: "assistant",
         content: "",
         date: new Date(),
         ...(reasoningContent ? { reasoningContent } : {}),
-        toolCalls: normalizedToolCalls,
+        ...(normalizedToolCalls.length > 0 ? { toolCalls: normalizedToolCalls } : {}),
       };
     }
 

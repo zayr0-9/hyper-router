@@ -414,7 +414,40 @@ describe("OpenRouterProvider", () => {
     expect(result.message?.reasoningContent).toBe("I should inspect the image.");
   });
 
-  it("handles empty text with no tool calls", async () => {
+  it("preserves reasoning-only responses as assistant messages", async () => {
+    const provider = new OpenRouterProvider({
+      client: createMockClient(() => ({
+        getText: async () => "   ",
+        getToolCalls: async () => [],
+        getResponse: async () => ({
+          output: [
+            {
+              type: "reasoning",
+              text: "I should answer carefully.",
+            },
+          ],
+        }),
+      })),
+    });
+
+    const result = await provider.generate({
+      model: "openai/gpt-5-mini",
+      messages: createMessages(),
+      tools: [],
+      previousSessionMetadata: null,
+    });
+
+    expect(result.message).toMatchObject({
+      role: "assistant",
+      content: "",
+      reasoningContent: "I should answer carefully.",
+    });
+    expect(result.message?.toolCalls).toBeUndefined();
+    expect(result.toolCalls).toEqual([]);
+    expect(result.stopReason).toBe("stop");
+  });
+
+  it("handles empty text with no reasoning or tool calls", async () => {
     const provider = new OpenRouterProvider({
       client: createMockClient(() => ({
         getText: async () => "   ",

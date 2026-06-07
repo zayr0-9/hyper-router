@@ -177,6 +177,52 @@ describe("JsonStorage", () => {
     });
   });
 
+  it("serializes concurrent writes on the same instance", async () => {
+    const { storage, filePath } = await createStorage();
+
+    await Promise.all([
+      storage.saveMessages("session-concurrent", [
+        {
+          role: "user",
+          content: "Concurrent hello",
+          date: new Date("2025-01-01T00:00:01.000Z"),
+        },
+      ]),
+      storage.saveRun({
+        sessionId: "session-concurrent",
+        status: "completed",
+      }),
+      storage.setSessionMetadata?.("session-concurrent", {
+        custom: {
+          source: "concurrent-test",
+        },
+      }),
+    ]);
+
+    const raw = JSON.parse(await readFile(filePath, "utf8")) as {
+      sessions: Record<string, unknown>;
+    };
+
+    expect(raw.sessions["session-concurrent"]).toEqual({
+      messages: [
+        {
+          role: "user",
+          content: "Concurrent hello",
+          date: "2025-01-01T00:00:01.000Z",
+        },
+      ],
+      run: {
+        sessionId: "session-concurrent",
+        status: "completed",
+      },
+      metadata: {
+        custom: {
+          source: "concurrent-test",
+        },
+      },
+    });
+  });
+
   it("can be reused across instances by pointing at the same file", async () => {
     const { filePath, storage } = await createStorage();
 

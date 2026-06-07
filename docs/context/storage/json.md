@@ -64,14 +64,15 @@ Like `InMemoryStorage`, it filters out system messages during transcript save.
 
 ## Write strategy
 
-`JsonStorage` currently writes by:
+`JsonStorage` writes by:
 
-1. reading the existing JSON file
-2. mutating the in-memory data structure
-3. writing a temporary file
-4. renaming the temporary file into place
+1. serializing mutating operations within one `JsonStorage` instance
+2. reading the existing JSON file
+3. mutating the in-memory data structure
+4. writing a unique temporary file in the same directory
+5. renaming the temporary file into place
 
-This gives a basic atomic-write pattern for a single writer on a local filesystem.
+This gives a basic atomic-write pattern for simple single-process use on a local filesystem. The per-instance queue prevents overlapping writes through the same adapter instance from interleaving, and unique temporary files avoid temp-path collisions.
 
 ## Strengths
 
@@ -92,7 +93,8 @@ That means:
 - large usage can make the file grow continuously
 - updates rewrite the file
 - concurrency is limited
-- multiple writers are not coordinated
+- writes are serialized only within a single `JsonStorage` instance
+- multiple adapter instances or processes are not coordinated
 
 ### Not a database
 
@@ -111,6 +113,8 @@ Use with care if you expect:
 - multiple app instances writing at once
 - frequent writes from several workers
 - remote or unusual filesystems
+
+For heavier concurrency or shared production writers, prefer `SqliteStorage` or `PostgresStorage` instead of adding database-like coordination to this JSON adapter.
 
 ## Recommended use cases
 

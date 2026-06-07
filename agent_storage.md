@@ -92,9 +92,10 @@ File: `src/storage/json.ts`
 - Stores all sessions in one JSON file.
 - File shape is `{ version: 1, sessions: { [sessionId]: { messages, run, metadata } } }`.
 - Serializes dates to ISO strings and restores them to `Date` objects.
-- Writes via temp file then rename.
+- Serializes writes within one adapter instance and writes via unique temp file then rename.
 - Good for local durable development and debugging.
-- Limited for concurrent writers or high-volume production usage.
+- Intended for simple single-process/single-writer usage.
+- Use SQLite/Postgres for stronger concurrency or high-volume production usage.
 
 ### `SqliteStorage`
 

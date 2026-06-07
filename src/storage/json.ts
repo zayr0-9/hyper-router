@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -39,6 +40,7 @@ const EMPTY_STORAGE: JsonStorageFileData = {
 
 export class JsonStorage implements StorageAdapter {
   private readonly filePath: string;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: JsonStorageOptions) {
     this.filePath = options.filePath;
@@ -50,22 +52,26 @@ export class JsonStorage implements StorageAdapter {
   }
 
   async saveMessages(sessionId: string, messages: Message[]): Promise<void> {
-    await this.updateData((data) => {
-      const session = this.getOrCreateSession(data, sessionId);
-      session.messages = messages
-        .filter((message) => message.role !== "system")
-        .map((message) => this.serializeMessage(message));
-    });
+    await this.enqueueWrite(() =>
+      this.updateData((data) => {
+        const session = this.getOrCreateSession(data, sessionId);
+        session.messages = messages
+          .filter((message) => message.role !== "system")
+          .map((message) => this.serializeMessage(message));
+      }),
+    );
   }
 
   async saveRun(record: RunRecord): Promise<void> {
-    await this.updateData((data) => {
-      const session = this.getOrCreateSession(data, record.sessionId);
-      session.run = {
-        sessionId: record.sessionId,
-        status: record.status,
-      };
-    });
+    await this.enqueueWrite(() =>
+      this.updateData((data) => {
+        const session = this.getOrCreateSession(data, record.sessionId);
+        session.run = {
+          sessionId: record.sessionId,
+          status: record.status,
+        };
+      }),
+    );
   }
 
   async getSessionMetadata(sessionId: string): Promise<SessionMetadata | null> {
@@ -74,10 +80,12 @@ export class JsonStorage implements StorageAdapter {
   }
 
   async setSessionMetadata(sessionId: string, metadata: SessionMetadata): Promise<void> {
-    await this.updateData((data) => {
-      const session = this.getOrCreateSession(data, sessionId);
-      session.metadata = metadata;
-    });
+    await this.enqueueWrite(() =>
+      this.updateData((data) => {
+        const session = this.getOrCreateSession(data, sessionId);
+        session.metadata = metadata;
+      }),
+    );
   }
 
   private serializeMessage(message: Message): SerializedMessage {
@@ -131,10 +139,19 @@ export class JsonStorage implements StorageAdapter {
     await this.writeData(data);
   }
 
+  private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.writeQueue.then(operation, operation);
+    this.writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   private async writeData(data: JsonStorageFileData): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
 
-    const tempFilePath = `${this.filePath}.tmp`;
+    const tempFilePath = `${this.filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
     await writeFile(tempFilePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
     await rename(tempFilePath, this.filePath);
   }

@@ -2,8 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { AgentDefinition } from "./agent.js";
 import type { ModelProvider } from "./providers.js";
-import type { CommitRunResult, SessionMetadata, StorageAdapter, StorageAdapterV2 } from "./storage.js";
-import type { AnyToolDefinition, ToolPermissionMode } from "./tool.js";
+import { isJsonSchemaLike, isZodSchema } from "./schema.js";
+import type {
+  CommitRunResult,
+  SessionMetadata,
+  StorageAdapter,
+  StorageAdapterV2,
+} from "./storage.js";
+import type { AnyToolDefinition, ToolPermissionMode, ToolPermissionPolicy } from "./tool.js";
 import type {
   AgentRunInput,
   GeneratedImage,
@@ -215,7 +221,13 @@ export class AgentRuntime {
           break;
         }
 
-        const toolMessages = await this.executeToolCalls(input.sessionId, runId, signal, step, toolCalls);
+        const toolMessages = await this.executeToolCalls(
+          input.sessionId,
+          runId,
+          signal,
+          step,
+          toolCalls,
+        );
         messages.push(...toolMessages);
         status = "needs_tool";
 
@@ -230,11 +242,18 @@ export class AgentRuntime {
         stopReason = "cancelled";
 
         if (!isEphemeral) {
-          commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
-            baseRevision,
-            baseMessageCount,
-            previousMessages,
-          });
+          commitResult = await this.persistRunState(
+            input.sessionId,
+            runId,
+            status,
+            messages,
+            currentSessionMetadata,
+            {
+              baseRevision,
+              baseMessageCount,
+              previousMessages,
+            },
+          );
           committedSessionId = commitResult?.sessionId ?? input.sessionId;
         }
 
@@ -244,7 +263,9 @@ export class AgentRuntime {
           messages,
           sessionId: committedSessionId,
           ...(commitResult?.revision !== undefined ? { revision: commitResult.revision } : {}),
-          ...(commitResult?.messageCount !== undefined ? { messageCount: commitResult.messageCount } : {}),
+          ...(commitResult?.messageCount !== undefined
+            ? { messageCount: commitResult.messageCount }
+            : {}),
           ...(generatedImages.length > 0 ? { generatedImages } : {}),
         };
       }
@@ -252,11 +273,18 @@ export class AgentRuntime {
       status = "failed";
 
       if (!isEphemeral) {
-        commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
-          baseRevision,
-          baseMessageCount,
-          previousMessages,
-        });
+        commitResult = await this.persistRunState(
+          input.sessionId,
+          runId,
+          status,
+          messages,
+          currentSessionMetadata,
+          {
+            baseRevision,
+            baseMessageCount,
+            previousMessages,
+          },
+        );
         committedSessionId = commitResult?.sessionId ?? input.sessionId;
       }
 
@@ -266,11 +294,18 @@ export class AgentRuntime {
     }
 
     if (!isEphemeral) {
-      commitResult = await this.persistRunState(input.sessionId, runId, status, messages, currentSessionMetadata, {
-        baseRevision,
-        baseMessageCount,
-        previousMessages,
-      });
+      commitResult = await this.persistRunState(
+        input.sessionId,
+        runId,
+        status,
+        messages,
+        currentSessionMetadata,
+        {
+          baseRevision,
+          baseMessageCount,
+          previousMessages,
+        },
+      );
       committedSessionId = commitResult?.sessionId ?? input.sessionId;
     }
 
@@ -281,7 +316,9 @@ export class AgentRuntime {
       messages,
       sessionId: committedSessionId,
       ...(commitResult?.revision !== undefined ? { revision: commitResult.revision } : {}),
-      ...(commitResult?.messageCount !== undefined ? { messageCount: commitResult.messageCount } : {}),
+      ...(commitResult?.messageCount !== undefined
+        ? { messageCount: commitResult.messageCount }
+        : {}),
       ...(generatedImages.length > 0 ? { generatedImages } : {}),
     };
   }
@@ -362,18 +399,137 @@ export class AgentRuntime {
       model: this.config.agent.model,
       promptHash: this.hashValue(this.config.agent.instructions),
       promptSnapshot: this.config.agent.instructions,
-      toolsetHash: this.hashValue(
-        JSON.stringify(
-          (this.config.agent.tools ?? []).map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema ?? null,
-            permission: tool.permission ?? null,
-          })),
-        ),
-      ),
+      toolsetHash: this.buildToolsetHash(),
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  private buildToolsetHash(): string {
+    const toolDescriptors = (this.config.agent.tools ?? []).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: this.describeInputSchemaForHash(tool.inputSchema),
+      permission: this.describePermissionForHash(tool.permission),
+    }));
+
+    return this.hashValue(this.stableStringify(toolDescriptors));
+  }
+  //Determine type of input schema
+  private describeInputSchemaForHash(inputSchema: unknown): unknown {
+    if (inputSchema == null) {
+      return { kind: "none" };
+    }
+
+    if (isJsonSchemaLike(inputSchema)) {
+      return {
+        kind: "json-schema",
+        schema: inputSchema,
+      };
+    }
+
+    if (isZodSchema(inputSchema)) {
+      const zodSchema = inputSchema as {
+        toJSONSchema?: () => unknown;
+        type?: unknown;
+        def?: unknown;
+        _def?: unknown;
+        constructor?: { name?: string };
+      };
+
+      try {
+        if (typeof zodSchema.toJSONSchema === "function") {
+          return {
+            kind: "zod-json-schema",
+            schema: zodSchema.toJSONSchema(),
+          };
+        }
+      } catch {
+        // Fall back to a conservative descriptor below.
+      }
+
+      return {
+        kind: "zod",
+        type: typeof zodSchema.type === "string" ? zodSchema.type : null,
+        typeName: zodSchema.constructor?.name ?? null,
+        definition: zodSchema.def ?? zodSchema._def ?? null,
+      };
+    }
+
+    return {
+      kind: "unknown",
+      type: typeof inputSchema,
+    };
+  }
+  // simple helper to clean permission object
+  private describePermissionForHash(permission: ToolPermissionPolicy | undefined): unknown {
+    if (!permission) {
+      return null;
+    }
+
+    return {
+      mode: permission.mode,
+      reason: permission.reason ?? null,
+    };
+  }
+
+  private stableStringify(value: unknown): string {
+    return JSON.stringify(this.toStableJsonValue(value, new WeakSet<object>()));
+  }
+
+  private toStableJsonValue(value: unknown, seen: WeakSet<object>): unknown {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "bigint") {
+      return { $bigint: value.toString() };
+    }
+
+    if (typeof value === "undefined") {
+      return { $type: "undefined" };
+    }
+
+    if (typeof value === "function") {
+      return { $type: "function" };
+    }
+
+    if (typeof value === "symbol") {
+      return { $symbol: value.description ?? null };
+    }
+
+    if (value instanceof Date) {
+      return { $date: value.toISOString() };
+    }
+
+    if (typeof value !== "object") {
+      return { $type: typeof value };
+    }
+
+    if (seen.has(value)) {
+      return { $ref: "circular" };
+    }
+
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      const arrayValue = value.map((item) => this.toStableJsonValue(item, seen));
+      seen.delete(value);
+      return arrayValue;
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    const stableObject: Record<string, unknown> = {};
+    for (const key of Object.keys(objectValue).sort()) {
+      stableObject[key] = this.toStableJsonValue(objectValue[key], seen);
+    }
+
+    seen.delete(value);
+    return stableObject;
   }
 
   private hashValue(value: string): string {

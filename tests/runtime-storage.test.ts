@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod/v4";
 
 import { defineAgent } from "../src/core/agent.js";
 import type { ModelProvider } from "../src/core/providers.js";
@@ -243,6 +244,154 @@ describe("AgentRuntime storage", () => {
     expect(metadata?.promptHash).toEqual(expect.any(String));
     expect(metadata?.toolsetHash).toEqual(expect.any(String));
     expect(metadata?.updatedAt).toEqual(expect.any(String));
+  });
+
+  it("builds session metadata without crashing on Zod schemas and circular permission metadata", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "done",
+          date: new Date("2025-01-01T00:00:22.000Z"),
+        },
+        stopReason: "stop",
+      })),
+    };
+
+    const circularMetadata: Record<string, unknown> = {
+      category: "filesystem",
+    };
+    circularMetadata.self = circularMetadata;
+
+    const tool = defineTool<{ path: string; content: string }, { path: string; content: string }>({
+      name: "write_file",
+      description: "Write a file.",
+      inputSchema: z.object({
+        path: z.string(),
+        content: z.string(),
+      }),
+      permission: {
+        mode: "ask",
+        reason: "Writes to disk.",
+        metadata: circularMetadata,
+      },
+      async execute(args) {
+        return { ok: true, output: args };
+      },
+    });
+
+    const storage = new InMemoryStorage();
+    await storage.setSessionMetadata("zod-circular-metadata-session", {
+      custom: {
+        tenantId: "tenant-123",
+      },
+    });
+
+    const result = await createRuntime({
+      agent: defineAgent({
+        name: "metadata-agent",
+        instructions: "Be helpful.",
+        model: "stub-model",
+        tools: [tool],
+      }),
+      provider,
+      storage,
+    }).run({
+      sessionId: "zod-circular-metadata-session",
+      input: "Hi",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(provider.generate).toHaveBeenCalledOnce();
+
+    const metadata = await storage.getSessionMetadata("zod-circular-metadata-session");
+    expect(metadata).toMatchObject({
+      agentName: "metadata-agent",
+      model: "stub-model",
+      custom: {
+        tenantId: "tenant-123",
+      },
+    });
+    expect(metadata?.toolsetHash).toEqual(expect.any(String));
+  });
+
+  it("uses stable toolset hashes and excludes permission metadata", async () => {
+    const provider: ModelProvider = {
+      generate: vi.fn(async (): Promise<ModelResponse> => ({
+        message: {
+          role: "assistant",
+          content: "done",
+          date: new Date("2025-01-01T00:00:24.000Z"),
+        },
+        stopReason: "stop",
+      })),
+    };
+
+    function createAgentForSchema(schema: Record<string, unknown>, metadataLabel: string) {
+      const metadata: Record<string, unknown> = { label: metadataLabel };
+      metadata.self = metadata;
+
+      const tool = defineTool({
+        name: "echo",
+        description: "Echo text.",
+        inputSchema: schema,
+        permission: {
+          mode: "ask" as const,
+          reason: "Needs approval.",
+          metadata,
+        },
+        async execute(args) {
+          return { ok: true, output: args };
+        },
+      });
+
+      return defineAgent({
+        name: "stable-hash-agent",
+        instructions: "Be helpful.",
+        model: "stub-model",
+        tools: [tool],
+      });
+    }
+
+    const schemaA = {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        count: { type: "number" },
+      },
+      required: ["text"],
+    };
+    const schemaB = {
+      required: ["text"],
+      properties: {
+        count: { type: "number" },
+        text: { type: "string" },
+      },
+      type: "object",
+    };
+
+    const storageA = new InMemoryStorage();
+    const runtimeA = createRuntime({
+      agent: createAgentForSchema(schemaA, "a"),
+      provider,
+      storage: storageA,
+    });
+
+    const storageB = new InMemoryStorage();
+    const runtimeB = createRuntime({
+      agent: createAgentForSchema(schemaB, "b"),
+      provider,
+      storage: storageB,
+    });
+
+    await runtimeA.run({ sessionId: "stable-hash-session-a", input: "Hi" });
+    await runtimeB.run({ sessionId: "stable-hash-session-b", input: "Hi" });
+
+    const hashA = (await storageA.getSessionMetadata("stable-hash-session-a"))?.toolsetHash;
+    const hashB = (await storageB.getSessionMetadata("stable-hash-session-b"))?.toolsetHash;
+
+    expect(hashA).toEqual(expect.any(String));
+    expect(hashB).toBe(hashA);
   });
 });
 

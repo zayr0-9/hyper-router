@@ -94,6 +94,7 @@ describe("PostgresStorage", () => {
 
     const upsert = queries.find((query) => query.text.includes("INSERT INTO") && query.text.includes("messages_json"));
     expect(upsert).toBeDefined();
+    expect(upsert?.text).toContain("updated_at = NOW()");
     expect(upsert?.values?.[0]).toBe("session-1");
 
     const payload = JSON.parse(String(upsert?.values?.[1])) as Array<Record<string, unknown>>;
@@ -198,6 +199,7 @@ describe("PostgresStorage", () => {
     await expect(storage.getSessionMetadata("session-3")).resolves.toEqual(metadata);
 
     const upsert = queries.find((query) => query.text.includes("INSERT INTO") && query.text.includes("metadata_json"));
+    expect(upsert?.text).toContain("updated_at = NOW()");
     expect(upsert?.values).toEqual(["session-3", JSON.stringify(metadata)]);
   });
 
@@ -211,6 +213,7 @@ describe("PostgresStorage", () => {
       (query) => query.text.includes("INSERT INTO") && query.text.includes("run_status"),
     );
     expect(upsert?.text).toContain('INSERT INTO "agents"."sessions"');
+    expect(upsert?.text).toContain("updated_at = NOW()");
     expect(upsert?.values).toEqual(["session-4", "completed"]);
   });
 

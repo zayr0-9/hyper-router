@@ -96,7 +96,9 @@ export class PostgresStorage implements StorageAdapter {
       `INSERT INTO ${this.qualifiedTableName()} (session_id, messages_json)
        VALUES ($1, $2::jsonb)
        ON CONFLICT (session_id)
-       DO UPDATE SET messages_json = EXCLUDED.messages_json`,
+       DO UPDATE SET
+         messages_json = EXCLUDED.messages_json,
+         updated_at = NOW()`,
       [sessionId, JSON.stringify(serialized)],
     );
   }
@@ -108,7 +110,9 @@ export class PostgresStorage implements StorageAdapter {
       `INSERT INTO ${this.qualifiedTableName()} (session_id, run_status)
        VALUES ($1, $2)
        ON CONFLICT (session_id)
-       DO UPDATE SET run_status = EXCLUDED.run_status`,
+       DO UPDATE SET
+         run_status = EXCLUDED.run_status,
+         updated_at = NOW()`,
       [record.sessionId, record.status],
     );
   }
@@ -131,7 +135,9 @@ export class PostgresStorage implements StorageAdapter {
       `INSERT INTO ${this.qualifiedTableName()} (session_id, metadata_json)
        VALUES ($1, $2::jsonb)
        ON CONFLICT (session_id)
-       DO UPDATE SET metadata_json = EXCLUDED.metadata_json`,
+       DO UPDATE SET
+         metadata_json = EXCLUDED.metadata_json,
+         updated_at = NOW()`,
       [sessionId, JSON.stringify(metadata)],
     );
   }

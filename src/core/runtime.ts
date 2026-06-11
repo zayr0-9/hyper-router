@@ -414,7 +414,6 @@ export class AgentRuntime {
 
     return this.hashValue(this.stableStringify(toolDescriptors));
   }
-  //Determine type of input schema
   private describeInputSchemaForHash(inputSchema: unknown): unknown {
     if (inputSchema == null) {
       return { kind: "none" };
@@ -431,8 +430,6 @@ export class AgentRuntime {
       const zodSchema = inputSchema as {
         toJSONSchema?: () => unknown;
         type?: unknown;
-        def?: unknown;
-        _def?: unknown;
         constructor?: { name?: string };
       };
 
@@ -451,7 +448,6 @@ export class AgentRuntime {
         kind: "zod",
         type: typeof zodSchema.type === "string" ? zodSchema.type : null,
         typeName: zodSchema.constructor?.name ?? null,
-        definition: zodSchema.def ?? zodSchema._def ?? null,
       };
     }
 
@@ -477,13 +473,12 @@ export class AgentRuntime {
   }
 
   private toStableJsonValue(value: unknown, seen: WeakSet<object>): unknown {
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
       return value;
+    }
+
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : { $number: String(value) };
     }
 
     if (typeof value === "bigint") {
@@ -525,7 +520,13 @@ export class AgentRuntime {
     const objectValue = value as Record<string, unknown>;
     const stableObject: Record<string, unknown> = {};
     for (const key of Object.keys(objectValue).sort()) {
-      stableObject[key] = this.toStableJsonValue(objectValue[key], seen);
+      try {
+        stableObject[key] = this.toStableJsonValue(objectValue[key], seen);
+      } catch (error) {
+        stableObject[key] = {
+          $error: error instanceof Error ? error.message : String(error),
+        };
+      }
     }
 
     seen.delete(value);

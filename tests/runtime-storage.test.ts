@@ -393,6 +393,94 @@ describe("AgentRuntime storage", () => {
     expect(hashA).toEqual(expect.any(String));
     expect(hashB).toBe(hashA);
   });
+
+  it("isolates saved and loaded messages from caller mutation while preserving dates", async () => {
+    const storage = new InMemoryStorage();
+    const savedDate = new Date("2025-01-01T00:00:00.000Z");
+    const savedMessages: Message[] = [
+      {
+        role: "user",
+        content: "original user content",
+        date: savedDate,
+      },
+      {
+        role: "assistant",
+        content: "original assistant content",
+        date: new Date("2025-01-01T00:00:01.000Z"),
+        toolCalls: [
+          {
+            id: "call-1",
+            toolName: "echo",
+            args: { text: "original arg" },
+          },
+        ],
+      },
+    ];
+
+    await storage.saveMessages("clone-message-session", savedMessages);
+
+    savedMessages[0]!.content = "mutated after save";
+    savedDate.setUTCFullYear(2030);
+    const savedToolArgs = savedMessages[1]!.toolCalls![0]!.args as { text: string };
+    savedToolArgs.text = "mutated after save";
+
+    const loadedMessages = await storage.loadMessages("clone-message-session");
+    loadedMessages[0]!.content = "mutated after load";
+    loadedMessages[0]!.date.setUTCFullYear(2040);
+    const loadedToolArgs = loadedMessages[1]!.toolCalls![0]!.args as { text: string };
+    loadedToolArgs.text = "mutated after load";
+
+    const reloadedMessages = await storage.loadMessages("clone-message-session");
+
+    expect(reloadedMessages).toMatchObject([
+      { role: "user", content: "original user content" },
+      {
+        role: "assistant",
+        content: "original assistant content",
+        toolCalls: [
+          {
+            id: "call-1",
+            toolName: "echo",
+            args: { text: "original arg" },
+          },
+        ],
+      },
+    ]);
+    expect(reloadedMessages[0]?.date).toBeInstanceOf(Date);
+    expect(reloadedMessages[0]?.date.toISOString()).toBe("2025-01-01T00:00:00.000Z");
+    expect(reloadedMessages[0]?.date).not.toBe(savedDate);
+  });
+
+  it("isolates saved and loaded session metadata from caller mutation", async () => {
+    const storage = new InMemoryStorage();
+    const metadata = {
+      agentName: "metadata-agent",
+      custom: {
+        nested: {
+          value: "original custom value",
+        },
+      },
+    };
+
+    await storage.setSessionMetadata("clone-metadata-session", metadata);
+
+    metadata.agentName = "mutated after save";
+    (metadata.custom.nested as { value: string }).value = "mutated after save";
+
+    const loadedMetadata = await storage.getSessionMetadata("clone-metadata-session");
+    expect(loadedMetadata).not.toBeNull();
+    loadedMetadata!.agentName = "mutated after load";
+    ((loadedMetadata!.custom?.nested as { value: string }).value) = "mutated after load";
+
+    await expect(storage.getSessionMetadata("clone-metadata-session")).resolves.toEqual({
+      agentName: "metadata-agent",
+      custom: {
+        nested: {
+          value: "original custom value",
+        },
+      },
+    });
+  });
 });
 
 it("can resume a paused tool chain from persisted transcript with a fresh runtime and provider", async () => {
